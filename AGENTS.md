@@ -368,8 +368,10 @@ The package follows semantic versioning through the `version` field in
 The first public version is `0.1.0`. GitHub publishes it through two release
 references:
 
-- `latest` is the moving release rebuilt from the current `main`.
-- `v0.1.0` is the permanent first-version release and must never be moved.
+- `latest` is the moving release tag rebuilt from the current `main`; fixed
+  download links must use `/releases/download/latest/<asset>`.
+- `v0.1.0` is the permanent first-version release, is marked as GitHub's
+  **Latest** stable release, and must never be moved.
 
 - Patch: compatible bug fixes.
 - Minor: compatible user-facing features.
