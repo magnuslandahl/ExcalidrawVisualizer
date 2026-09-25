@@ -18,8 +18,12 @@ not react to its own writes.
 
 | Windows 10/11 | Download |
 | --- | --- |
-| Installer with Start menu and `.excalidraw` association | [ExcalidrawVisualizer Windows x64 Setup](https://github.com/magnuslandahl/ExcalidrawVisualizer/releases/latest/download/ExcalidrawVisualizer-Windows-x64-Setup.exe) |
-| Portable executable, no installation required | [ExcalidrawVisualizer Windows x64 Portable](https://github.com/magnuslandahl/ExcalidrawVisualizer/releases/latest/download/ExcalidrawVisualizer-Windows-x64-Portable.exe) |
+| Installer with Start menu and `.excalidraw` association | [ExcalidrawVisualizer Windows x64 Setup](https://github.com/magnuslandahl/ExcalidrawVisualizer/releases/download/latest/ExcalidrawVisualizer-Windows-x64-Setup.exe) |
+| Portable executable, no installation required | [ExcalidrawVisualizer Windows x64 Portable](https://github.com/magnuslandahl/ExcalidrawVisualizer/releases/download/latest/ExcalidrawVisualizer-Windows-x64-Portable.exe) |
+
+The links above target the rolling release tag named `latest`. GitHub's
+**Latest** stable release is the immutable first public version,
+[v0.1.0](https://github.com/magnuslandahl/ExcalidrawVisualizer/releases/tag/v0.1.0).
 
 The links above follow the rolling `latest` build. The immutable first public
 release is [v0.1.0](https://github.com/magnuslandahl/ExcalidrawVisualizer/releases/tag/v0.1.0).

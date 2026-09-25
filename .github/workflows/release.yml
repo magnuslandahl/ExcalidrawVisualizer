@@ -141,13 +141,26 @@ jobs:
           fi
 
           if gh release view "${TAG}" >/dev/null 2>&1; then
-            gh release edit "${TAG}" --title "${TITLE}" --notes-file release-notes.md --latest
+            if [ "${ROLLING}" = "true" ]; then
+              gh release edit "${TAG}" --title "${TITLE}" --notes-file release-notes.md
+            else
+              gh release edit "${TAG}" --title "${TITLE}" --notes-file release-notes.md --latest
+            fi
             gh release upload "${TAG}" installers/* --clobber
           else
-            gh release create "${TAG}" \
-              --title "${TITLE}" \
-              --notes-file release-notes.md \
-              --target "${GITHUB_SHA}" \
-              --latest \
-              installers/*
+            if [ "${ROLLING}" = "true" ]; then
+              gh release create "${TAG}" \
+                --title "${TITLE}" \
+                --notes-file release-notes.md \
+                --target "${GITHUB_SHA}" \
+                --latest=false \
+                installers/*
+            else
+              gh release create "${TAG}" \
+                --title "${TITLE}" \
+                --notes-file release-notes.md \
+                --target "${GITHUB_SHA}" \
+                --latest \
+                installers/*
+            fi
           fi
