@@ -21,6 +21,9 @@ not react to its own writes.
 | Installer with Start menu and `.excalidraw` association | [ExcalidrawVisualizer Windows x64 Setup](https://github.com/magnuslandahl/ExcalidrawVisualizer/releases/latest/download/ExcalidrawVisualizer-Windows-x64-Setup.exe) |
 | Portable executable, no installation required | [ExcalidrawVisualizer Windows x64 Portable](https://github.com/magnuslandahl/ExcalidrawVisualizer/releases/latest/download/ExcalidrawVisualizer-Windows-x64-Portable.exe) |
 
+The links above follow the rolling `latest` build. The immutable first public
+release is [v0.1.0](https://github.com/magnuslandahl/ExcalidrawVisualizer/releases/tag/v0.1.0).
+
 The packages are currently unsigned. Windows SmartScreen may show **Windows protected
 your PC** the first time they run. Choose **More info**, then **Run anyway**. A managed
 computer may block unsigned applications through organization policy.
@@ -217,6 +220,8 @@ GitHub Actions follows the same public-release pattern as FeedbackRecorder:
   installer and portable downloads.
 - A semantic version tag such as `v0.2.0` publishes a permanent release whose filenames
   include that version.
+- `v0.1.0` is the permanent first public release; `latest` continues to move with
+  validated changes on `main`.
 - Every release contains `SHA256SUMS.txt`; build artifacts are also retained by Actions
   for 14 days.
 
@@ -227,9 +232,10 @@ npm version patch --no-git-tag-version
 npm run release:check-version -- v0.1.1
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution and release flow and
-[AGENTS.md](AGENTS.md) for the detailed product, architecture, safety, and roadmap
-briefing.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution and release flow,
+[AGENTS.md](AGENTS.md) for the detailed product, architecture, and safety briefing, and
+[TODO.md](TODO.md) for the active handoff queue. macOS support is the next platform
+priority, but implementation and packaging have not started.
 
 ## Architecture
 
