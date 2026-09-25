@@ -1,0 +1,61 @@
+{
+  "name": "excalidraw-visualizer",
+  "version": "0.1.0",
+  "description": "Offline Electron editor and live viewer for Excalidraw files",
+  "main": "./out/main/index.js",
+  "type": "module",
+  "author": "Excalidraw Visualizer contributors",
+  "license": "MIT",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/magnuslandahl/ExcalidrawVisualizer.git"
+  },
+  "homepage": "https://github.com/magnuslandahl/ExcalidrawVisualizer#readme",
+  "bugs": {
+    "url": "https://github.com/magnuslandahl/ExcalidrawVisualizer/issues"
+  },
+  "engines": {
+    "node": ">=20.19"
+  },
+  "scripts": {
+    "prepare-assets": "node scripts/copy-excalidraw-assets.mjs",
+    "predev": "npm run prepare-assets",
+    "dev": "electron-vite dev",
+    "prebuild": "npm run prepare-assets",
+    "build": "npm run typecheck && electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check": "npm test && npm run typecheck && npm run lint",
+    "release:check-version": "node scripts/check-release-version.mjs",
+    "package": "npm run build && electron-builder --win nsis portable --publish never",
+    "package:dir": "npm run build && electron-builder --dir --publish never"
+  },
+  "dependencies": {
+    "@excalidraw/excalidraw": "0.18.1",
+    "chokidar": "5.0.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "@types/node": "26.6.2",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "5.2.0",
+    "electron": "44.4.5",
+    "electron-builder": "26.15.3",
+    "electron-vite": "5.0.0",
+    "eslint": "9.39.5",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "eslint-plugin-react-refresh": "0.5.7",
+    "jsdom": "30.1.1",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.70.1",
+    "vite": "7.3.6",
+    "vitest": "5.0.1"
+  }
+}
