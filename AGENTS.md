@@ -6,7 +6,7 @@ configuration, or documentation.
 
 ## Public repository safety
 
-This repository is intended to be public at:
+This repository is public at:
 `https://github.com/magnuslandahl/ExcalidrawVisualizer`.
 
 Treat every tracked file, commit, branch, tag, commit message, issue, pull
@@ -163,6 +163,7 @@ the Excalidraw canvas renders blank.
 .github/workflows/
   ci.yml                 Cross-platform checks, Windows packaging smoke, secrets
   release.yml            Rolling and tagged Windows release publishing
+TODO.md                   Current handoff queue and platform roadmap
 build/                    Application and file-association icons
 scripts/
   check-release-version  Enforces tag/package version agreement
@@ -295,6 +296,12 @@ Requirements:
 - npm
 - Windows 10/11 for Windows package creation
 
+The dependency, quality-check, build, and development commands are expected to
+be cross-platform. Windows is still the only packaged and advertised target.
+The next platform task is to validate and package the application on macOS;
+follow `TODO.md` and do not claim macOS support before completing its packaged
+runtime checks.
+
 Install and run:
 
 ```powershell
@@ -358,6 +365,12 @@ process launch alone does not prove that the editor rendered.
 The package follows semantic versioning through the `version` field in
 `package.json` and `package-lock.json`.
 
+The first public version is `0.1.0`. GitHub publishes it through two release
+references:
+
+- `latest` is the moving release rebuilt from the current `main`.
+- `v0.1.0` is the permanent first-version release and must never be moved.
+
 - Patch: compatible bug fixes.
 - Minor: compatible user-facing features.
 - Major: incompatible file, behavior, or platform changes.
@@ -398,9 +411,9 @@ target is configured, tested on the target platform, and added to CI.
 - Gitleaks against both files and complete Git history
 - a single aggregate `CI` result suitable for branch protection
 
-Recommended GitHub settings:
+Configured GitHub settings:
 
-- public repository under `magnuslandahl/ExcalidrawVisualizer`
+- public repository at `magnuslandahl/ExcalidrawVisualizer`
 - default branch `main`
 - require pull requests before merge
 - require the `CI` status check
@@ -408,8 +421,10 @@ Recommended GitHub settings:
 - block force pushes and branch deletion on `main`
 - enable Dependabot security updates and secret scanning
 
-Do not add an `origin` remote or push unless the repository owner explicitly
-asks. Creating the public repository is a separate, visible action.
+`origin` points to the public repository. `main` is protected, including for
+administrators, so normal changes must be pushed to a short-lived branch,
+validated in a pull request, and merged only after the aggregate `CI` check
+passes. Do not rewrite or move the permanent `v0.1.0` tag.
 
 ## Documentation responsibilities
 
@@ -438,20 +453,22 @@ Implemented:
 - element/file three-way merge and explicit conflict resolution
 - focused tests, linting, strict TypeScript, Windows packaging
 - public CI, secret scanning, rolling releases, tagged releases, checksums
+- public repository, protected `main`, rolling `latest`, and permanent `v0.1.0`
 
 Near-term plan:
 
-1. Publish the initial public repository and enable branch protection.
-2. Replace placeholder application/file icons with final original artwork.
-3. Add a packaged renderer smoke test to CI, including non-zero canvas
+1. Add tested macOS development, packaging, CI, and release support. This work
+   is planned in `TODO.md` and has not started.
+2. Add Windows code signing when a certificate is available.
+3. Replace placeholder application/file icons with final original artwork.
+4. Add a packaged renderer smoke test to CI, including non-zero canvas
    dimensions and offline network assertions.
-4. Add Windows code signing when a certificate is available.
-5. Gather public feedback before expanding the merge model or platform matrix.
+5. Add privacy-safe screenshots after final branding is available.
+6. Gather public feedback before expanding the merge model further.
 
 Possible later work, not current commitments:
 
 - property-level merging within a single element
-- signed and notarized macOS packages
 - Linux AppImage packages
 - Windows ARM64 packages
 - opt-in update notifications backed by GitHub Releases
@@ -468,4 +485,5 @@ Before declaring work complete:
 6. Review `git diff --check`, `git status --short`, and ignored/generated files.
 7. Scan for secrets and personal data.
 8. Update README and this briefing when behavior or policy changed.
-9. Do not commit, tag, create a repository, or push unless explicitly asked.
+9. Update `TODO.md` when an item is completed, added, or reprioritized.
+10. Do not commit, tag, create releases, or push unless explicitly asked.
