@@ -163,6 +163,8 @@ the Excalidraw canvas renders blank.
 .github/workflows/
   ci.yml                 Cross-platform checks, Windows packaging smoke, secrets
   release.yml            Rolling and tagged Windows release publishing
+DIAGRAM-DESIGN-GUIDELINES.md
+                          Visual language for overview and detailed architecture drawings
 TODO.md                   Current handoff queue and platform roadmap
 build/                    Application and file-association icons
 scripts/
