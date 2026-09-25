@@ -25,9 +25,6 @@ The links above target the rolling release tag named `latest`. GitHub's
 **Latest** stable release is the immutable first public version,
 [v0.1.0](https://github.com/magnuslandahl/ExcalidrawVisualizer/releases/tag/v0.1.0).
 
-The links above follow the rolling `latest` build. The immutable first public
-release is [v0.1.0](https://github.com/magnuslandahl/ExcalidrawVisualizer/releases/tag/v0.1.0).
-
 The packages are currently unsigned. Windows SmartScreen may show **Windows protected
 your PC** the first time they run. Choose **More info**, then **Run anyway**. A managed
 computer may block unsigned applications through organization policy.
