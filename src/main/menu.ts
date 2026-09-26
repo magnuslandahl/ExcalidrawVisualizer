@@ -29,34 +29,53 @@ export const installApplicationMenu = (options: MenuOptions): void => {
           click: () => sendCommand(options.getWindow, { type: 'open-path', path })
         }))
 
+  const fileSubmenu: MenuItemConstructorOptions[] = [
+    {
+      label: 'Open…',
+      accelerator: 'CmdOrCtrl+O',
+      click: () => sendCommand(options.getWindow, { type: 'open' })
+    },
+    { label: 'Open Recent', submenu: recentItems },
+    { type: 'separator' },
+    {
+      label: 'Save',
+      accelerator: 'CmdOrCtrl+S',
+      click: () => sendCommand(options.getWindow, { type: 'save' })
+    },
+    {
+      label: 'Save As…',
+      accelerator: 'CmdOrCtrl+Shift+S',
+      click: () => sendCommand(options.getWindow, { type: 'save-as' })
+    },
+    {
+      label: 'Reload from Disk',
+      accelerator: 'CmdOrCtrl+Shift+R',
+      click: () => sendCommand(options.getWindow, { type: 'reload' })
+    }
+  ]
+
+  if (process.platform !== 'darwin') {
+    fileSubmenu.push({ type: 'separator' }, { role: 'quit' })
+  }
+
   const template: MenuItemConstructorOptions[] = [
+    ...(process.platform === 'darwin'
+      ? [{ role: 'appMenu' as const }]
+      : []),
     {
       label: 'File',
+      submenu: fileSubmenu
+    },
+    {
+      label: 'Edit',
       submenu: [
-        {
-          label: 'Open…',
-          accelerator: 'CmdOrCtrl+O',
-          click: () => sendCommand(options.getWindow, { type: 'open' })
-        },
-        { label: 'Open Recent', submenu: recentItems },
+        { role: 'undo' },
+        { role: 'redo' },
         { type: 'separator' },
-        {
-          label: 'Save',
-          accelerator: 'CmdOrCtrl+S',
-          click: () => sendCommand(options.getWindow, { type: 'save' })
-        },
-        {
-          label: 'Save As…',
-          accelerator: 'CmdOrCtrl+Shift+S',
-          click: () => sendCommand(options.getWindow, { type: 'save-as' })
-        },
-        {
-          label: 'Reload from Disk',
-          accelerator: 'CmdOrCtrl+Shift+R',
-          click: () => sendCommand(options.getWindow, { type: 'reload' })
-        },
-        { type: 'separator' },
-        { label: 'Quit', accelerator: 'Alt+F4', click: () => app.quit() }
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' }
       ]
     },
     {
@@ -74,20 +93,12 @@ export const installApplicationMenu = (options: MenuOptions): void => {
         { type: 'separator' },
         { role: 'togglefullscreen' }
       ]
-    },
-    {
-      label: 'Edit',
-      submenu: [
-        { role: 'undo' },
-        { role: 'redo' },
-        { type: 'separator' },
-        { role: 'cut' },
-        { role: 'copy' },
-        { role: 'paste' },
-        { role: 'selectAll' }
-      ]
     }
   ]
+
+  if (process.platform === 'darwin') {
+    template.push({ role: 'windowMenu' })
+  }
 
   if (!app.isPackaged) {
     template.push({

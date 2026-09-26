@@ -31,8 +31,12 @@
     "test:watch": "vitest",
     "check": "npm test && npm run typecheck && npm run lint",
     "release:check-version": "node scripts/check-release-version.mjs",
-    "package": "npm run build && electron-builder --win nsis portable --publish never",
-    "package:dir": "npm run build && electron-builder --dir --publish never"
+    "package": "npm run build && electron-builder --publish never",
+    "package:win": "npm run build && electron-builder --win nsis portable --publish never",
+    "package:mac": "npm run build && electron-builder --mac dmg --arm64 --x64 --publish never",
+    "package:dir": "npm run build && electron-builder --dir --publish never",
+    "package:mac:dir": "npm run build && electron-builder --mac --dir --publish never",
+    "smoke:mac": "node scripts/smoke-packaged-macos.mjs"
   },
   "dependencies": {
     "@excalidraw/excalidraw": "0.18.1",
@@ -56,6 +60,7 @@
     "typescript": "5.9.3",
     "typescript-eslint": "8.70.1",
     "vite": "7.3.6",
-    "vitest": "5.0.1"
+    "vitest": "5.0.1",
+    "ws": "8.18.3"
   }
 }

@@ -16,18 +16,35 @@ not react to its own writes.
 
 ## Download
 
-| Windows 10/11 | Download |
+| Platform | Download |
 | --- | --- |
-| Installer with Start menu and `.excalidraw` association | [ExcalidrawVisualizer Windows x64 Setup](https://github.com/magnuslandahl/ExcalidrawVisualizer/releases/download/latest/ExcalidrawVisualizer-Windows-x64-Setup.exe) |
-| Portable executable, no installation required | [ExcalidrawVisualizer Windows x64 Portable](https://github.com/magnuslandahl/ExcalidrawVisualizer/releases/download/latest/ExcalidrawVisualizer-Windows-x64-Portable.exe) |
+| Windows 10/11 x64 installer | [ExcalidrawVisualizer Windows x64 Setup](https://github.com/magnuslandahl/ExcalidrawVisualizer/releases/download/latest/ExcalidrawVisualizer-Windows-x64-Setup.exe) |
+| Windows 10/11 x64 portable | [ExcalidrawVisualizer Windows x64 Portable](https://github.com/magnuslandahl/ExcalidrawVisualizer/releases/download/latest/ExcalidrawVisualizer-Windows-x64-Portable.exe) |
+| macOS 13+ on Apple silicon (M-series) | [ExcalidrawVisualizer macOS arm64 DMG](https://github.com/magnuslandahl/ExcalidrawVisualizer/releases/download/latest/ExcalidrawVisualizer-macOS-arm64.dmg) |
+| macOS 13+ on Intel | [ExcalidrawVisualizer macOS x64 DMG](https://github.com/magnuslandahl/ExcalidrawVisualizer/releases/download/latest/ExcalidrawVisualizer-macOS-x64.dmg) |
 
 The links above target the rolling release tag named `latest`. GitHub's
 **Latest** stable release is the immutable first public version,
 [v0.1.0](https://github.com/magnuslandahl/ExcalidrawVisualizer/releases/tag/v0.1.0).
 
-The packages are currently unsigned. Windows SmartScreen may show **Windows protected
-your PC** the first time they run. Choose **More info**, then **Run anyway**. A managed
-computer may block unsigned applications through organization policy.
+The packages are currently unsigned for distribution.
+
+- **Windows:** SmartScreen may show **Windows protected your PC**. Choose
+  **More info**, then **Run anyway**. Managed-device policy may block unsigned
+  applications completely.
+- **macOS:** Open the DMG, drag **Excalidraw Visualizer** to **Applications**,
+  and try to open it once. After macOS blocks it, open **System Settings →
+  Privacy & Security**, scroll to **Security**, and choose **Open Anyway**.
+  Each DMG includes a **How to open this app** file with the same steps. If
+  macOS instead says the app is damaged, do not move it to the Trash; run:
+
+  ```bash
+  xattr -dr com.apple.quarantine "/Applications/Excalidraw Visualizer.app"
+  ```
+
+  Do not disable Gatekeeper system-wide. The current ad-hoc signature makes the
+  bundle internally runnable but does not provide Apple-verified publisher
+  identity or notarization.
 
 ## Features
 
@@ -50,6 +67,7 @@ computer may block unsigned applications through organization policy.
 - Node.js 20.19 or newer (Node.js 22.12+ is also supported by the build toolchain)
 - npm
 - Windows 10/11 for Windows installer creation
+- macOS 13 Ventura or newer for macOS disk-image creation
 
 All dependency versions are pinned in `package.json` and resolved in
 `package-lock.json`.
@@ -91,10 +109,17 @@ Build unpackaged production resources:
 npm run build
 ```
 
-Create Windows x64 NSIS and portable packages:
+Create packages for the current operating system:
 
 ```powershell
 npm run package
+```
+
+Create a specific platform's packages:
+
+```powershell
+npm run package:win
+npm run package:mac
 ```
 
 Create only an unpacked application directory:
@@ -109,20 +134,23 @@ written to `release/`. The builder configuration sets:
 - Product name: `Excalidraw Visualizer`
 - Executable: `ExcalidrawVisualizer.exe`
 - Windows targets: x64 NSIS installer and x64 portable executable
+- macOS targets: Apple silicon and Intel x64 DMGs for macOS 13 or newer
 - `.excalidraw` file association
 
 The current builds use a simple project icon from `build/`; it can be replaced with final
-branding without changing the package layout. Production signing is not configured;
-supply the normal electron-builder signing environment variables in release CI.
+branding without changing the package layout. Production signing and macOS notarization
+are not configured. macOS bundles receive only a local ad-hoc signature after packaging;
+Apple Developer ID signing, hardened runtime, notarization, and stapling remain required.
 
 ## Opening files
 
 Use any of these paths:
 
-- **File > Open** or `Ctrl+O`
+- **File > Open**, `Ctrl+O` on Windows, or `⌘O` on macOS
 - The **Open** button on the welcome screen or header
 - Drop one `.excalidraw` file onto the application window
 - Launch `ExcalidrawVisualizer.exe C:\path\drawing.excalidraw`
+- Launch the macOS app with `/Applications/Excalidraw\ Visualizer.app/Contents/MacOS/ExcalidrawVisualizer /path/drawing.excalidraw`
 - Open an associated `.excalidraw` file after installing the packaged application
 
 A second application launch forwards its file to the existing window and focuses it.
@@ -215,10 +243,14 @@ requests.
 
 GitHub Actions follows the same public-release pattern as FeedbackRecorder:
 
-- Pull requests and `main` run tests, type-checking, linting, a Windows packaging smoke
-  test, and Gitleaks scans of files and Git history.
-- Every push to `main` refreshes the rolling `latest` release and uploads fixed-name
-  installer and portable downloads.
+- Pull requests and `main` run tests, type-checking, linting, Windows and macOS
+  packaging smoke tests, and Gitleaks scans of files and Git history.
+- The macOS smoke test launches the packaged native app, opens a real
+  `.excalidraw` path, checks both canvas layers, exercises an external atomic
+  update and an application save, and rejects renderer errors or remote
+  requests.
+- Every push to `main` refreshes the rolling `latest` release and uploads
+  fixed-name Windows and macOS downloads.
 - A semantic version tag such as `v0.2.0` publishes a permanent release whose filenames
   include that version.
 - `v0.1.0` is the permanent first public release; `latest` continues to move with
@@ -235,8 +267,8 @@ npm run release:check-version -- v0.1.1
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution and release flow,
 [AGENTS.md](AGENTS.md) for the detailed product, architecture, and safety briefing, and
-[TODO.md](TODO.md) for the active handoff queue. macOS support is the next platform
-priority, but implementation and packaging have not started.
+[TODO.md](TODO.md) for the active handoff queue. Apple Developer ID signing and
+notarization are the next macOS distribution priorities.
 
 ## Architecture
 
@@ -270,10 +302,11 @@ Security boundaries:
 - The watcher reflects the latest stable content exposed by the operating system; a
   program that performs several complete writes faster than filesystem notifications can
   be delivered may expose only the final state.
-- Windows packages are not code-signed, so SmartScreen may warn or managed-device policy
-  may block them.
-- Windows is the primary packaged target. The runtime architecture is cross-platform, but
-  macOS/Linux packaging and signing targets are not configured yet.
+- Windows packages are not code-signed, so SmartScreen may warn or
+  managed-device policy may block them.
+- macOS packages are ad-hoc signed but not Developer ID signed or notarized, so
+  Gatekeeper blocks the first launch until the user explicitly approves it.
+- Linux packaging is not configured.
 
 ## License
 
