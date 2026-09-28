@@ -624,6 +624,11 @@ transactional embedded store and a local socket/named pipe; use loopback only if
 the demonstrated extension lifecycle requires it. Pin compatible dependencies and
 record packaged-platform evidence before these choices become implementation facts.
 
+The active [Stage 0 feasibility record](AGENT-FEEDBACK-STAGE0.md) documents the
+installed host/SDK surface and a bounded project-extension diagnostic harness.
+That harness is evidence-gathering infrastructure, not application integration;
+its open gates remain authoritative until live multi-task and lifecycle tests pass.
+
 ### Stage 1 — Document and feedback foundations
 
 Refactor into per-document controllers and state. Add tabs, point/element/region

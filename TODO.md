@@ -20,6 +20,18 @@ These are future features, not current application capabilities.
 - [ ] Stage 0: prove same-session GitHub Copilot desktop delivery, startup in both
   directions, readiness, recovery, and isolation between two concurrent tasks.
   Record supported versions/capabilities and finalize transport/storage contracts.
+  - [x] Record the installed app/CLI/SDK surface and add a bounded same-session
+    diagnostic extension with authenticated loopback ingress.
+  - [x] Verify extension discovery, canvas/action routing, runtime input validation,
+    authenticated status, descriptor permissions, and unauthenticated rejection.
+  - [x] Verify that a real immediate send while busy enters the steering lane and
+    arrives in the originating conversation.
+  - [x] Verify that a real queued send while busy drains automatically after the
+    active turn and correlates admission, queued delivery, turn, and result IDs.
+  - [ ] Correlate queued and immediate sends while already idle, final session-idle
+    completion, and permission and clarification blocks.
+  - [ ] Prove isolation with two simultaneous tasks and complete reload, restart,
+    sleep/wake, stale-generation, and startup-in-both-directions checks.
 - [ ] Stage 1: add document-scoped tabs, anchored comments, persisted drafts and
   outbox, plus bundled local Swedish/English dictation on supported platforms.
 - [ ] Stage 2: complete pairing, immediate/queued delivery, replies, result review,
