@@ -109,6 +109,16 @@ const api: DesktopApi = {
     ipcRenderer.invoke(ipcChannels.companionInstall) as ReturnType<
       DesktopApi['installCopilotCompanion']
     >,
+  getAppVersion: () =>
+    ipcRenderer.invoke(ipcChannels.appVersion) as Promise<string>,
+  checkForUpdates: () =>
+    ipcRenderer.invoke(ipcChannels.updateCheck) as ReturnType<
+      DesktopApi['checkForUpdates']
+    >,
+  installUpdate: (asset) =>
+    ipcRenderer.invoke(ipcChannels.updateInstall, asset) as ReturnType<
+      DesktopApi['installUpdate']
+    >,
   rendererReady: () =>
     ipcRenderer.invoke(ipcChannels.rendererReady) as Promise<string[]>,
   getDroppedFilePath: (file) => webUtils.getPathForFile(file),
@@ -129,6 +139,12 @@ const api: DesktopApi = {
       listener(payload)
     ipcRenderer.on(ipcChannels.agentEvent, handler)
     return () => ipcRenderer.removeListener(ipcChannels.agentEvent, handler)
+  },
+  onUpdateProgress: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, progress: number): void =>
+      listener(progress)
+    ipcRenderer.on(ipcChannels.updateProgress, handler)
+    return () => ipcRenderer.removeListener(ipcChannels.updateProgress, handler)
   }
 }
 

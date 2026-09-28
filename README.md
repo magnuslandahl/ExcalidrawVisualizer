@@ -62,6 +62,7 @@ The packages are currently unsigned for distribution.
 - Embedded image/file-map preservation and merging
 - Explicit Fit to Content without resetting the viewport on normal external updates
 - System, light, and dark application themes with a remembered preference
+- Running version and an explicit, checksum-verified update control in the toolbar
 - Arbitrary canvas background colors saved as normal Excalidraw document state
 - Standard Excalidraw stroke and fill palettes whenever an element is selected
 - Local feedback drafts anchored to selected elements, points, rectangular regions, or
@@ -117,6 +118,25 @@ Visualizer does not scan, infer, activate, or create Copilot tasks. The tested h
 exposes no supported global task discovery route, so pairing must begin inside the
 intended task. The [agent feedback proposal](docs/AGENT-FEEDBACK-PROPOSAL.md) and
 [Stage 0 capability record](docs/AGENT-FEEDBACK-STAGE0.md) document that boundary.
+
+## Version and updates
+
+The application header shows the running semantic version. **Check for updates**
+is manual: Visualizer makes no update request at startup and remains fully usable
+offline. When clicked, it checks the rolling `latest` release in this GitHub
+repository and shows **No update available** when the running version is current.
+
+For a newer version, the same control downloads the correct Windows x64 or macOS
+architecture package, verifies it against the release's `SHA256SUMS.txt`, and
+installs it. Windows launches the per-user NSIS upgrade. A writable installed
+macOS application stages and swaps the verified app bundle, then reopens it; a
+copy that cannot replace itself opens the verified DMG instead. Visualizer refuses
+to start installation while any drawing has unsaved changes or an unresolved
+conflict.
+
+Update traffic is limited to the public GitHub release API and immutable release
+assets after the user clicks the control. No drawing, feedback, or application
+state is included in those requests.
 
 ## Requirements
 

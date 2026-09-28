@@ -8,6 +8,7 @@ import { FeedbackStore } from './feedback-store'
 import { feedbackDocumentStorageKey } from './feedback-document'
 import { installApplicationMenu } from './menu'
 import { RecentFiles } from './recent-files'
+import { UpdateService } from './update-service'
 import {
   ipcChannels,
   type AppCommand,
@@ -46,6 +47,7 @@ let agentFeedbackService: AgentFeedbackService | undefined
 let copilotCompanionInstaller: CopilotCompanionInstaller | undefined
 let dictationService: DictationService | undefined
 let recentFiles: RecentFiles | undefined
+let updateService: UpdateService | undefined
 
 const getExcalidrawPaths = (argv: readonly string[]): string[] =>
   argv.filter((argument) => argument.toLowerCase().endsWith('.excalidraw'))
@@ -117,6 +119,31 @@ const refreshApplicationMenu = (): void => {
     getActiveDocumentId: () => getPreferredContext()?.activeDocumentId ?? null,
     recentFiles
   })
+}
+
+const hasDirtyDocuments = (): boolean =>
+  [...windows.values()].some((context) =>
+    [...context.dirtyDocuments.values()].some(Boolean)
+  )
+
+const prepareToQuitForUpdate = (): (() => void) => {
+  if (hasDirtyDocuments()) {
+    throw new Error(
+      'Save or discard all drawing changes before installing an update'
+    )
+  }
+  const previous = [...windows.values()].map((context) => ({
+    context,
+    allowClose: context.allowClose
+  }))
+  for (const { context } of previous) {
+    context.allowClose = true
+  }
+  return () => {
+    for (const { context, allowClose } of previous) {
+      context.allowClose = allowClose
+    }
+  }
 }
 
 const attachWindowGuards = (context: WindowContext): void => {
@@ -631,6 +658,32 @@ const registerIpc = (): void => {
     }
     return copilotCompanionInstaller.install()
   })
+  ipcMain.handle(ipcChannels.appVersion, () => app.getVersion())
+  ipcMain.handle(ipcChannels.updateCheck, () => {
+    if (!updateService) {
+      throw new Error('The update service is unavailable')
+    }
+    return updateService.check()
+  })
+  ipcMain.handle(ipcChannels.updateInstall, (event, asset: unknown) => {
+    if (!updateService) {
+      throw new Error('The update service is unavailable')
+    }
+    if (hasDirtyDocuments()) {
+      throw new Error(
+        'Save or discard all drawing changes before installing an update'
+      )
+    }
+    return updateService.install(
+      asset,
+      (progress) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send(ipcChannels.updateProgress, progress)
+        }
+      },
+      prepareToQuitForUpdate
+    )
+  })
   ipcMain.handle(ipcChannels.rendererReady, (event) => {
     const context = requireWindowContext(event.sender)
     context.registry.resetRendererVisibility()
@@ -696,6 +749,7 @@ const initialize = async (): Promise<void> => {
     companionSourceDirectory,
     copilotHome
   )
+  updateService = new UpdateService()
   dictationService = new DictationService(
     join(app.getPath('userData'), 'dictation-temp')
   )

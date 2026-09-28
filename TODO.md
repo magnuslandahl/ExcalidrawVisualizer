@@ -113,6 +113,8 @@ images.
 
 ## Product and test polish
 
+- [x] Show the running version, fix tab-strip overflow, and add an explicit
+  checksum-verified Windows/macOS update flow using the rolling GitHub release.
 - [x] Add multi-file tabs with independent autosave/watch/merge state,
   drag-to-reorder, a two-pane side-by-side view, and safe tab detachment into
   additional secured windows.

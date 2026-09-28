@@ -30,7 +30,8 @@ import type {
   DictationLanguage,
   DocumentEvent,
   DocumentStatus,
-  OpenedDocument
+  OpenedDocument,
+  UpdateCheckResult
 } from '../../shared/contracts'
 import type {
   FeedbackBounds,
@@ -60,6 +61,14 @@ type EditorSeed = {
 type ThemePreference = 'system' | 'light' | 'dark'
 type Theme = 'light' | 'dark'
 type PaneId = 'primary' | 'secondary'
+type UpdatePhase =
+  | 'idle'
+  | 'checking'
+  | 'current'
+  | 'available'
+  | 'downloading'
+  | 'installing'
+  | 'error'
 
 type TabEntry = {
   document: OpenedDocument
@@ -2045,6 +2054,10 @@ export function App(): React.JSX.Element {
   const [focusedPane, setFocusedPane] = useState<PaneId>('primary')
   const [commands, setCommands] = useState<Record<string, EditorCommand>>({})
   const [detail, setDetail] = useState<string | null>(null)
+  const [appVersion, setAppVersion] = useState('')
+  const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null)
+  const [updatePhase, setUpdatePhase] = useState<UpdatePhase>('idle')
+  const [updateProgress, setUpdateProgress] = useState(0)
   const [draggingDocumentId, setDraggingDocumentId] = useState<string | null>(
     null
   )
@@ -2203,6 +2216,29 @@ export function App(): React.JSX.Element {
   }, [themePreference])
 
   useEffect(() => {
+    let canceled = false
+    void window.desktop
+      .getAppVersion()
+      .then((version) => {
+        if (!canceled) {
+          setAppVersion(version)
+        }
+      })
+      .catch((error) => {
+        if (!canceled) {
+          setDetail(`Could not read the application version: ${messageFromError(error)}`)
+        }
+      })
+    const removeProgressListener = window.desktop.onUpdateProgress((progress) => {
+      setUpdateProgress(Math.max(0, Math.min(1, progress)))
+    })
+    return () => {
+      canceled = true
+      removeProgressListener()
+    }
+  }, [])
+
+  useEffect(() => {
     const removeDocumentListener = window.desktop.onDocumentEvent(handleDocumentEvent)
     const removeCommandListener = window.desktop.onAppCommand(handleCommand)
     void window.desktop.rendererReady().then((launchPaths) => {
@@ -2228,6 +2264,77 @@ export function App(): React.JSX.Element {
       window.removeEventListener('blur', dismiss)
     }
   }, [contextMenu])
+
+  const checkForUpdates = useCallback(async (): Promise<void> => {
+    setUpdatePhase('checking')
+    setDetail(null)
+    try {
+      const result = await window.desktop.checkForUpdates()
+      setUpdateResult(result)
+      if (!result.checked) {
+        setUpdatePhase('error')
+        setDetail(result.reason ?? 'The update check failed.')
+      } else if (!result.available) {
+        setUpdatePhase('current')
+      } else if (!result.installable || !result.asset) {
+        setUpdatePhase('error')
+        setDetail(result.reason ?? 'This update cannot be installed automatically.')
+      } else {
+        setUpdatePhase('available')
+        setDetail(
+          `Version ${result.latestVersion} is available. Click Install update to download and install it.`
+        )
+      }
+    } catch (error) {
+      setUpdatePhase('error')
+      setDetail(messageFromError(error))
+    }
+  }, [])
+
+  const installUpdate = useCallback(async (): Promise<void> => {
+    if (!updateResult?.asset) {
+      return
+    }
+    setUpdatePhase('downloading')
+    setUpdateProgress(0)
+    setDetail(null)
+    try {
+      const result = await window.desktop.installUpdate(updateResult.asset)
+      if (result.installed) {
+        setUpdatePhase('installing')
+        return
+      }
+      setUpdatePhase('idle')
+      setUpdateResult(null)
+      setDetail(result.message ?? 'The downloaded update was opened.')
+    } catch (error) {
+      setUpdatePhase('available')
+      setDetail(messageFromError(error))
+    }
+  }, [updateResult])
+
+  const updateButtonLabel =
+    updatePhase === 'checking'
+      ? 'Checking…'
+      : updatePhase === 'current'
+        ? 'No update available'
+        : updatePhase === 'available'
+          ? `Install ${updateResult?.latestVersion ?? 'update'}`
+          : updatePhase === 'downloading'
+            ? `Downloading ${Math.round(updateProgress * 100)}%`
+            : updatePhase === 'installing'
+              ? 'Installing…'
+              : updatePhase === 'error'
+                ? 'Check again'
+                : 'Check for updates'
+
+  const handleUpdateAction = (): void => {
+    if (updatePhase === 'available') {
+      void installUpdate()
+    } else {
+      void checkForUpdates()
+    }
+  }
 
   const updateMeta = useCallback((documentId: string, meta: EditorMeta): void => {
     metaRef.current.set(documentId, meta)
@@ -2401,9 +2508,26 @@ export function App(): React.JSX.Element {
       <header className="app-header">
         <div className="document-identity">
           <strong>Excalidraw Visualizer</strong>
+          {appVersion && (
+            <span className="app-version" title={`Version ${appVersion}`}>
+              {appVersion}
+            </span>
+          )}
           <span>Local diagrams and visual feedback</span>
         </div>
         <div className="header-actions">
+          <button
+            type="button"
+            className="update-button"
+            disabled={
+              updatePhase === 'checking' ||
+              updatePhase === 'downloading' ||
+              updatePhase === 'installing'
+            }
+            onClick={handleUpdateAction}
+          >
+            {updateButtonLabel}
+          </button>
           <label className="theme-control">
             <span>Theme</span>
             <select
