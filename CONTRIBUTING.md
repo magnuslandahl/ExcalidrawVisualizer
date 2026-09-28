@@ -20,14 +20,14 @@ Changes to Electron runtime behavior or packaging should also pass:
 
 ```powershell
 npm run package:dir
+npm run smoke:packaged -- "release\win-unpacked\ExcalidrawVisualizer.exe"
 ```
 
-On macOS packaging changes, build both architectures and run the packaged smoke
-test against the host architecture:
+On macOS, pass the host-architecture application bundle to the same smoke test:
 
 ```bash
 npm run package:mac
-npm run smoke:mac -- "release/mac-arm64/ExcalidrawVisualizer.app"
+npm run smoke:packaged -- "release/mac-arm64/ExcalidrawVisualizer.app"
 ```
 
 ## Public repository safety

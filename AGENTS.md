@@ -135,7 +135,14 @@ execute the emitted ESM preload bundle.
 ## Current user experience
 
 - The welcome view opens files through a button or drag and drop.
-- The header shows the active file, full path, save/watch status, application
+- Multiple drawings can remain open as tabs. Multi-selection, multi-file drop,
+  launch paths, and second-instance paths all add tabs without replacing dirty
+  work.
+- Tabs can be reordered, moved into a second side-by-side pane, or detached
+  through their context menu into another secured window.
+- Every tab remains mounted while hidden so its autosave, watcher, merge, and
+  conflict state continues independently.
+- The header shows the active tab's file, full path, save/watch status, application
   theme selector, canvas background color picker, Open, Fit to Content, and
   Reload.
 - Application appearance can be System, Light, or Dark and is remembered
@@ -169,7 +176,7 @@ build/                    Application/file icons, DMG guidance, ad-hoc signing h
 scripts/
   check-release-version  Enforces tag/package version agreement
   copy-excalidraw-assets Copies pinned local Excalidraw fonts
-  smoke-packaged-macos   Exercises the packaged renderer, file watch, and save
+  smoke-packaged         Exercises packaged tabs, split panes, watch, save, windows
 src/
   main/                   Trusted Electron and filesystem boundary
   preload/                Narrow contextBridge API
@@ -188,16 +195,21 @@ electron.vite.config.ts   Main, sandbox preload, renderer, offline font transfor
 - creates the secured `BrowserWindow`
 - registers typed IPC handlers
 - handles initial command-line paths, second-instance paths, and `open-file`
-- waits for an explicit renderer-ready handshake before delivering a launch path
+- waits for an explicit renderer-ready handshake before delivering launch paths
+- creates additional secured windows when a tab is detached
 - guards navigation, new windows, permissions, and dirty-window quitting
 
-`src/main/document-controller.ts` owns the active document:
+Each `BrowserWindow` owns one `DocumentController`. A controller owns a map of
+the documents open in that window:
 
 - validates `.excalidraw` paths
-- opens, reloads, saves, and saves as
+- opens, reloads, saves, saves as, and closes documents by path
 - updates recent files
-- switches the watcher when the active path changes
-- emits typed document events to the renderer
+- maintains one independent watcher per open path
+- emits path-specific document events only to its owning renderer
+
+Different windows may open the same path, but a single window deduplicates it
+to one tab. Save As must reject a destination already open in the same window.
 
 `src/main/atomic-write.ts` writes a temporary file in the destination directory,
 flushes it, replaces the destination, and preserves its mode when supported.
@@ -223,11 +235,11 @@ design avoids.
 
 `src/preload/index.ts` exposes only `window.desktop`, a typed API for:
 
-- open/open-path/reload
+- open/open-path/reload/close by path
 - save/save-as
-- recent files
+- open a validated path in another secured application window
 - dirty-state reporting
-- renderer-ready launch-path handoff
+- renderer-ready launch-path handoff for one or more files
 - document and menu command subscriptions
 - safe dropped-file path retrieval
 
@@ -236,15 +248,30 @@ main handler, validation, and tests together.
 
 ### Renderer
 
-`src/renderer/src/App.tsx` owns document UI state:
+`src/renderer/src/App.tsx` owns the workspace:
+
+- tab and primary/secondary pane ordering through
+  `src/shared/workspace-state.ts`
+- active tab and focused pane routing for menus and header controls
+- drag/reorder/split behavior and the tab context menu
+- close and detach safety
+- aggregate dirty state for window-close protection
+- theme, open/drop, path handoff, banners, and commands
+
+`src/renderer/src/DocumentEditor.tsx` owns each drawing's independent lifecycle:
 
 - base, current, and conflict scene references
 - Excalidraw imperative API integration
 - normalized open/external scenes
 - debounced save scheduling and in-flight save reconciliation
 - viewport-preserving external updates
-- theme and canvas color controls
-- drag and drop, commands, banners, and conflict actions
+- canvas color and conflict actions
+
+Keep every tab editor mounted when it is hidden. Moving a tab between panes must
+change layout only; it must not remount the editor or discard in-memory state.
+Only the visible editor in the focused pane may use
+`handleKeyboardGlobally`. Call `api.refresh()` when a hidden editor becomes
+visible or its pane dimensions change.
 
 Use Excalidraw's `restore()` before applying imported data and
 `serializeAsJSON(..., "local")` when producing saved scene JSON.
@@ -363,18 +390,21 @@ The focused Vitest suite currently covers:
 - deletion-versus-modification conflicts
 - embedded file-map merging
 - dirty-document merge behavior
+- tab path deduplication, side-pane movement, and pane collapse
 
 Use temporary directories and observable events for watcher tests. Do not add
 fixed sleeps as the assertion mechanism.
 
-The macOS package smoke test (`npm run smoke:mac -- <app-path>`) verifies:
+The cross-platform package smoke test
+(`npm run smoke:packaged -- <app-or-executable-path>`) verifies:
 
 - a real window appears
 - the sandboxed preload loads
-- a launch-path file opens
-- the workspace and both canvas layers have non-zero dimensions
-- atomic external replacement reaches the renderer
+- two launch-path files open as tabs
+- both side-by-side editors and their canvas layers have non-zero dimensions
+- atomic external replacement reaches only its matching tab
 - a renderer edit is saved through the main process
+- a tab detaches into a second secured application window
 - no renderer resource errors appear
 - no remote network request is attempted
 
@@ -485,6 +515,9 @@ Implemented:
 - SHA-256 echo and duplicate suppression
 - official Excalidraw editing UI with local fonts
 - application theme selection and arbitrary canvas background colors
+- multi-file tabs, two-pane side-by-side viewing, and tab detachment into
+  additional secured windows
+- independent per-document autosave, watcher, merge, and conflict lifecycles
 - viewport-preserving external updates
 - element/file three-way merge and explicit conflict resolution
 - focused tests, linting, strict TypeScript, Windows packaging
