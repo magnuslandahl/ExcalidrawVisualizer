@@ -125,7 +125,8 @@ through an explicit action.
   tab switching and restarts. Several drafts can be selected and sent as one
   feedback batch, reducing fragmented agent turns.
 
-Automatic queue processing is confirmed. An idle event alone is insufficient:
+Automatic queue processing is a confirmed product requirement.
+An idle event alone is insufficient:
 the adapter must distinguish ready from waiting for clarification, permission,
 recovery, or a disconnected host. These blocked states show their reason and
 hold the queue. A reply to the blocking question must remain sendable without
@@ -174,7 +175,8 @@ each Windows x64 and macOS arm64/x64 installer, outside ASAR as appropriate.
 No runtime model download is needed. Choose a different model only after comparing
 Swedish accuracy and response time on supported hardware.
 
-Read-only reference files in the public FeedbackRecorder project:
+Read-only reference files in the public
+[FeedbackRecorder snapshot](https://github.com/magnuslandahl/FeedbackRecorder/tree/a722dfa95bc38a73bb25f626cce7a2dfe9010acd):
 `app/src/main/whisper.js`, `app/src/shared/languages.js`,
 `app/src/shared/wav.js`, `app/scripts/fetch-vendor.js`,
 `app/electron-builder.yml`, and `docs/SHIPPED_COMPONENTS.md`.
@@ -198,7 +200,8 @@ do not copy the reference's fixed output stem into concurrent dictation jobs.
 Support cancellation, permission denial, empty/silent audio, missing or corrupted
 assets, and engine failure without losing an existing typed draft. VAD reduces
 silence hallucinations but does not prove transcript accuracy. Delete temporary
-audio after completion or cancellation by default.
+audio after completion, cancellation or failure. Recover orphaned temporary audio
+after a crash as specified in the local-data lifecycle below.
 
 Evaluate keeping the model loaded in a reusable worker so repeated short comments
 do not pay the model-startup cost every time. FeedbackRecorder's batch CLI approach
@@ -226,8 +229,9 @@ the existing task, rather than a second independently resumed process.
 
 Sources: [Copilot app customizations](https://docs.github.com/en/copilot/how-tos/github-copilot-app/customize-github-copilot-app),
 [canvas extensions](https://docs.github.com/en/copilot/how-tos/github-copilot-app/working-with-canvas-extensions),
-[extension API source](https://github.com/github/copilot-sdk/blob/main/nodejs/src/extension.ts),
-[GitHub Spec Kit extension example](https://github.com/github/spec-kit-copilot/blob/main/plugins/spec-kit-copilot-sdd/extensions/sdd-canvas/extension.mjs).
+[extension API source](https://github.com/github/copilot-sdk/blob/d106d29dc6c5112da2abdae59008571b6692f12b/nodejs/src/extension.ts),
+[GitHub Spec Kit extension example](https://github.com/github/spec-kit-copilot/blob/b602ad0e2ba9694624f9d8dd42e197c3bf7ed040/plugins/spec-kit-copilot-sdd/extensions/sdd-canvas/extension.mjs).
+Source snapshots were checked on 2026-09-28; living product documentation may change.
 
 Proposed topology:
 
@@ -300,12 +304,15 @@ These are design names, not existing public APIs.
 | Entity | Key fields and responsibilities |
 | --- | --- |
 | Document | Stable local `documentId`, canonical path, disk fingerprint, saved revision, per-document controller |
-| Agent binding | `bindingId`, provider, host/session identity, working directory, document IDs, connection state, capabilities, binding generation |
+| Agent binding | `bindingId`, provider, host/session identity, working directory, document ID, connection state, capabilities, binding generation |
 | Feedback thread | `feedbackId`, document ID, target anchor, messages, user resolution state |
 | Anchor | Element IDs, original scene bounds/point, source revision, short text labels, optional local crop |
 | Submission | Immutable batch ID, binding generation, document revision, feedback IDs, delivery intent, order |
 | Delivery receipt | Submission ID, provider message ID if supplied, accepted/unknown/rejected state, timestamps |
 | Agent outcome | Submission and feedback IDs, reply, changed IDs, observed result revision, reported result |
+
+Each binding represents one document/session pair. Bindings for the same session
+share dispatch ordering, while their document permissions remain independent.
 
 Every submission freezes what the user meant, its target, and its destination.
 Later edits create an amendment or another submission. They do not rewrite what
@@ -400,6 +407,46 @@ reconcile dispatching/unknown attempts, and only then resume eligible work. A cr
 after host acceptance but before receipt persistence must not create a duplicate.
 An unknown attempt blocks further queued dispatch to that session until reconciled;
 other sessions continue. The absence of a reply is not evidence of rejection.
+
+### Local-data lifecycle
+
+Recommended default: retain drafts, submitted history and recovery receipts until
+the user deletes them, so a long-running task does not silently lose its context.
+Explain this in the feedback UI. Do not automatically expire pending or ambiguous
+submissions to meet a capacity target. Capacity measurements may inform warnings
+and explicit cleanup choices; they do not silently change this retention policy.
+
+Provide **Delete local feedback** for a document, a task's document set, or all
+feedback. Preview the affected scope and include drafts, outbox items, replies,
+receipts, snapshots/crops and associated bindings. Confirm deletion of that local
+data without deleting or modifying the `.excalidraw` files. Unpair only revokes
+access and freezes pending work; explicitly offer local deletion separately.
+
+Serialize deletion with dispatch and dictation. Retire the affected binding
+generations and document/draft job identities (including unpaired drafts), cancel
+unsent work and local capture jobs, and make the deletion
+intent durable before removing records/assets. Ignore late callbacks from retired
+generations so they cannot recreate data or replay a deleted submission. Finish
+interrupted cleanup on startup before reconnecting or dispatching. Already sent
+or ambiguously sent work may still execute in Copilot; local deletion neither
+cancels that work nor erases content already received by the provider. Any later
+pairing uses a new binding generation without recovering deleted submissions.
+Deleting one document's feedback leaves other documents' bindings, jobs and history
+intact, even when they share the same agent session.
+
+Delete private crops/snapshots when their last owning record is removed; shared
+assets survive only while still referenced. Clean unreferenced assets and orphaned
+audio in application-owned temporary job directories on startup, after confirming
+no live job owns them. Never clean arbitrary user temporary files. Report cleanup
+failures and retry them; do not show deletion as complete while owned files remain.
+Local deletion is logical removal, not a promise of forensic erasure from disks,
+OS backups, or user-created exports.
+
+Keep persisted connection credentials in OS-backed secret storage; the feedback
+store holds only references. Remove scoped credentials on unpair/delete. If secure
+storage is unavailable, allow an explicit session-only connection without plaintext
+credential fallback or automatic restart reconnect. Stage 0 must validate this
+behavior for supported platforms, alongside the existing pairing/transport contract.
 
 ## 6. Multiple documents
 
@@ -527,6 +574,10 @@ Keep feedback semantics independent of provider-specific session APIs.
 - Integration tests: crash/restart recovery, late saves after tab switching,
   file deletion/recreation, concurrent external and local edits, and disconnected
   queue replay without accidental duplicate submissions.
+- Lifecycle tests: delete one document/task/all feedback, shared crop references,
+  unpair versus local deletion, crash during cleanup, orphaned audio after failure,
+  late send/transcription callbacks, secure-storage unavailability and cleanup
+  errors. Deleted pending items never replay; diagram files remain unchanged.
 - Conflict tests: a pending autosave or manual save cannot silently write conflicting
   content; no automatic resolution of incompatible concurrent changes.
 - UI tests: comment mode does not move drawing objects, annotations track pan/zoom,
@@ -576,6 +627,7 @@ The core service needs these logical operations; stage 0 fixes their wire schema
 | Observe delivery | Submission and provider receipt; separate accepted, unknown and rejected |
 | Report reply/result | Matching binding/submission/feedback IDs; bounded reply and optional changed IDs/revision |
 | Pause/cancel/revoke | Explicit user action; distinguish unsent cancellation from host cancellation |
+| Delete local feedback | Explicit document/task/all scope; retire bindings, cancel unsent work, remove owned data/assets and credentials |
 | Dictate | Document, draft and job ID; bounded audio input and editable local transcript |
 
 Decision record:
@@ -583,7 +635,7 @@ Decision record:
 1. Confirm the companion-extension approach while retaining the independent app.
 2. Choose the initial target interactions: element selection, region, point, and
    whole-document feedback are recommended; freehand markup can wait.
-3. **Confirmed:** queued feedback starts automatically when the agent is ready and
+3. **Confirmed product requirement:** queued feedback starts automatically when the agent is ready and
    idle. Drafts provide the deliberate hold-until-send behavior. No second Run click.
 4. Validate the proposed bundled Whisper small baseline and set dictation latency
    and accuracy acceptance targets. Built-in Swedish support is already decided.

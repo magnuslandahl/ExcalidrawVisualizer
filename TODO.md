@@ -15,8 +15,8 @@ rolling and tagged releases.
 Planning reference: [Visual feedback and agent integration](docs/AGENT-FEEDBACK-PROPOSAL.md).
 These are future features, not current application capabilities.
 
-- [x] Record the proposed workflow and confirmed automatic processing of queued
-  feedback when the agent is ready and idle; drafts remain unsent.
+- [x] Record the proposed workflow and the product requirement that queued feedback
+  start automatically when the agent is ready and idle; drafts remain unsent.
 - [ ] Stage 0: prove same-session GitHub Copilot desktop delivery, startup in both
   directions, readiness, recovery, and isolation between two concurrent tasks.
   Record supported versions/capabilities and finalize transport/storage contracts.
