@@ -5,6 +5,7 @@ publish: []
 directories:
   buildResources: build
   output: release
+afterPack: build/after-pack.mjs
 files:
   - out/**/*
   - package.json
@@ -26,9 +27,38 @@ nsis:
   createStartMenuShortcut: true
 portable:
   artifactName: ExcalidrawVisualizer-Windows-${arch}-Portable.${ext}
+mac:
+  icon: build/icon.png
+  category: public.app-category.graphics-design
+  minimumSystemVersion: '13.0'
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+dmg:
+  artifactName: ExcalidrawVisualizer-macOS-${arch}.${ext}
+  backgroundColor: '#f3f2fb'
+  window:
+    width: 540
+    height: 440
+  contents:
+    - x: 130
+      y: 200
+      type: file
+      name: Excalidraw Visualizer.app
+    - x: 410
+      y: 200
+      type: link
+      path: /Applications
+    - x: 270
+      y: 310
+      type: file
+      path: build/dmg-readme.txt
+      name: How to open this app.txt
 fileAssociations:
   - ext: excalidraw
     name: Excalidraw Drawing
     description: Excalidraw drawing document
     role: Editor
-    icon: build/file-icon.ico
+    icon: file-icon

@@ -22,6 +22,14 @@ Changes to Electron runtime behavior or packaging should also pass:
 npm run package:dir
 ```
 
+On macOS packaging changes, build both architectures and run the packaged smoke
+test against the host architecture:
+
+```bash
+npm run package:mac
+npm run smoke:mac -- "release/mac-arm64/ExcalidrawVisualizer.app"
+```
+
 ## Public repository safety
 
 Everything in this repository is public. Do not commit credentials, internal
@@ -56,5 +64,6 @@ git tag v0.1.1
 git push origin v0.1.1
 ```
 
-Packages are currently unsigned, so release notes must retain the Windows
-SmartScreen warning.
+Packages are currently unsigned for distribution, so release notes must retain
+the Windows SmartScreen and macOS Gatekeeper warnings. macOS's ad-hoc bundle
+signature is not Developer ID signing or notarization.

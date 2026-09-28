@@ -84,8 +84,7 @@ The neighboring FeedbackRecorder repository is the reference for public
 repository discipline and release behavior: pull-request CI, secret scanning,
 retained workflow artifacts, a rolling `latest` release from `main`, permanent
 version tags, checksums, and clear unsigned-package warnings. This project
-adopts those principles but remains Windows-first because that is the platform
-required and tested by its original brief.
+adopts those principles for its supported Windows and macOS packages.
 
 ## Product principles
 
@@ -161,15 +160,16 @@ the Excalidraw canvas renders blank.
 
 ```text
 .github/workflows/
-  ci.yml                 Cross-platform checks, Windows packaging smoke, secrets
-  release.yml            Rolling and tagged Windows release publishing
+  ci.yml                 Cross-platform checks, Windows/macOS package smoke, secrets
+  release.yml            Rolling and tagged Windows/macOS release publishing
 DIAGRAM-DESIGN-GUIDELINES.md
                           Visual language for overview and detailed architecture drawings
 TODO.md                   Current handoff queue and platform roadmap
-build/                    Application and file-association icons
+build/                    Application/file icons, DMG guidance, ad-hoc signing hook
 scripts/
   check-release-version  Enforces tag/package version agreement
   copy-excalidraw-assets Copies pinned local Excalidraw fonts
+  smoke-packaged-macos   Exercises the packaged renderer, file watch, and save
 src/
   main/                   Trusted Electron and filesystem boundary
   preload/                Narrow contextBridge API
@@ -297,12 +297,19 @@ Requirements:
 - Node.js 20.19 or newer
 - npm
 - Windows 10/11 for Windows package creation
+- macOS 13 Ventura or newer for macOS package creation
 
-The dependency, quality-check, build, and development commands are expected to
-be cross-platform. Windows is still the only packaged and advertised target.
-The next platform task is to validate and package the application on macOS;
-follow `TODO.md` and do not claim macOS support before completing its packaged
-runtime checks.
+The dependency, quality-check, build, and development commands are
+cross-platform. Windows x64 and macOS Apple silicon/Intel are packaged and
+advertised targets. Linux remains development-only.
+
+### Local checkout convention
+
+On this machine, normally work in the repository's primary (main) working tree.
+Do not create secondary Git worktrees or separate worktree-backed sessions for
+ordinary work here unless the user explicitly requests one. Use the currently
+checked-out branch in the primary working tree; this convention does not bypass
+the protected-`main` pull-request policy or authorize commits and pushes.
 
 Install and run:
 
@@ -318,11 +325,18 @@ npm run check
 npm run build
 ```
 
-Build Windows packages:
+Build packages for the current operating system:
 
 ```powershell
-npm run package:dir
 npm run package
+npm run package:dir
+```
+
+Build an explicit platform:
+
+```powershell
+npm run package:win
+npm run package:mac
 ```
 
 Outputs:
@@ -330,6 +344,9 @@ Outputs:
 - `out/` contains compiled Electron and renderer resources.
 - `release/win-unpacked/` contains the unpacked application.
 - `release/*.exe` contains the installer and portable executable.
+- `release/mac-arm64/` and `release/mac/` contain unpacked Apple silicon and
+  Intel applications.
+- `release/*.dmg` contains the Apple silicon and Intel disk images.
 
 These paths are generated and ignored.
 
@@ -350,17 +367,26 @@ The focused Vitest suite currently covers:
 Use temporary directories and observable events for watcher tests. Do not add
 fixed sleeps as the assertion mechanism.
 
-For renderer or layout changes, also verify a packaged application:
+The macOS package smoke test (`npm run smoke:mac -- <app-path>`) verifies:
 
 - a real window appears
 - the sandboxed preload loads
 - a launch-path file opens
 - the workspace and both canvas layers have non-zero dimensions
+- atomic external replacement reaches the renderer
+- a renderer edit is saved through the main process
 - no renderer resource errors appear
 - no remote network request is attempted
 
 Add a regression test when logic can be isolated. A screenshot or successful
 process launch alone does not prove that the editor rendered.
+
+Both macOS architectures are ad-hoc signed after packaging so the rewritten app
+bundle is internally valid and runnable. This is not Developer ID signing or
+notarization and does not satisfy Gatekeeper. Keep the DMG's opening
+instructions and the public unsigned-package warning until a Developer ID
+certificate, hardened-runtime entitlements, notarization, and stapling are
+configured and verified.
 
 ## Versioning and releases
 
@@ -397,14 +423,18 @@ Both channels build:
 
 - Windows x64 NSIS installer
 - Windows x64 portable executable
+- macOS Apple silicon DMG
+- macOS Intel x64 DMG
 - `SHA256SUMS.txt`
 
 Workflow artifacts are retained for 14 days even before release publication.
-Packages are currently unsigned; documentation must keep the SmartScreen
-warning visible until signing is actually configured and verified.
+Packages are currently unsigned for distribution; documentation must keep the
+SmartScreen and Gatekeeper warnings visible until signing is actually
+configured and verified. The macOS ad-hoc signature only makes each bundle
+internally runnable and does not establish publisher identity.
 
-Do not advertise macOS, Linux, ARM64, auto-update, or signed packages until each
-target is configured, tested on the target platform, and added to CI.
+Do not advertise Linux, Windows ARM64, auto-update, or signed/notarized packages
+until each target is configured, tested on the target platform, and added to CI.
 
 ## CI and repository settings
 
@@ -412,6 +442,8 @@ target is configured, tested on the target platform, and added to CI.
 
 - tests, type-checking, and linting on Windows, macOS, and Linux
 - an unpacked Windows packaging smoke test
+- macOS Apple silicon and Intel packaging plus a native packaged-runtime smoke
+  test
 - Gitleaks against both files and complete Git history
 - a single aggregate `CI` result suitable for branch protection
 
@@ -456,19 +488,20 @@ Implemented:
 - viewport-preserving external updates
 - element/file three-way merge and explicit conflict resolution
 - focused tests, linting, strict TypeScript, Windows packaging
+- macOS 13+ packaging for Apple silicon and Intel, native menu conventions,
+  `.excalidraw` association, DMG installation guidance, and packaged runtime
+  smoke coverage
 - public CI, secret scanning, rolling releases, tagged releases, checksums
 - public repository, protected `main`, rolling `latest`, and permanent `v0.1.0`
 
 Near-term plan:
 
-1. Add tested macOS development, packaging, CI, and release support. This work
-   is planned in `TODO.md` and has not started.
+1. Add Apple Developer ID signing, hardened runtime, and notarization when the
+   required certificate and credentials are available.
 2. Add Windows code signing when a certificate is available.
 3. Replace placeholder application/file icons with final original artwork.
-4. Add a packaged renderer smoke test to CI, including non-zero canvas
-   dimensions and offline network assertions.
-5. Add privacy-safe screenshots after final branding is available.
-6. Gather public feedback before expanding the merge model further.
+4. Add privacy-safe screenshots after final branding is available.
+5. Gather public feedback before expanding the merge model further.
 
 Possible later work, not current commitments:
 
