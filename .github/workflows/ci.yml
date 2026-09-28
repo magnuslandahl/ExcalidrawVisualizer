@@ -70,6 +70,7 @@ jobs:
           if (-not (Test-Path -LiteralPath $archive)) {
             throw "Missing packaged application archive: $archive"
           }
+          npm run smoke:packaged -- $executable
 
   package_macos:
     name: macOS packaging and runtime smoke test
@@ -96,7 +97,7 @@ jobs:
           else
             app="release/mac/ExcalidrawVisualizer.app"
           fi
-          npm run smoke:mac -- "$app"
+          npm run smoke:packaged -- "$app"
 
       - name: Verify both macOS architectures and disk images
         run: |

@@ -50,6 +50,12 @@ images.
 
 ## Product and test polish
 
+- [x] Add multi-file tabs with independent autosave/watch/merge state,
+  drag-to-reorder, a two-pane side-by-side view, and safe tab detachment into
+  additional secured windows.
+- [x] Extend packaged runtime smoke coverage across Windows and macOS to verify
+  two launch-path tabs, non-zero split canvases, path-isolated external
+  updates, autosave, detached windows, and zero remote renderer requests.
 - [ ] Replace the functional project/file icons with final original branding
   and verify them in installed shortcuts and `.excalidraw` associations.
 - [x] Add a packaged renderer smoke test that proves the editor and both canvas

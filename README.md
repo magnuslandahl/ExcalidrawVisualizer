@@ -49,6 +49,9 @@ The packages are currently unsigned for distribution.
 ## Features
 
 - Native open, save, save-as, reload, recent-files, drag-and-drop, and keyboard shortcuts
+- Multiple open drawings as tabs, including multi-file selection and multi-file drop
+- Drag-and-drop tab ordering and a two-pane side-by-side drawing view
+- Right-click tab detachment into another secured window for multi-monitor workflows
 - Launch-path handling, single-instance forwarding, and packaged `.excalidraw` association
 - Chokidar-based watching for direct writes, atomic replacement, deletion, and recreation
 - SHA-256 application-write echo suppression
@@ -128,6 +131,15 @@ Create only an unpacked application directory:
 npm run package:dir
 ```
 
+Exercise an unpacked package through its real preload, renderer, file watcher,
+autosave, split-view, and multi-window paths:
+
+```powershell
+npm run smoke:packaged -- release\win-unpacked\ExcalidrawVisualizer.exe
+```
+
+On macOS, pass the `.app` bundle instead.
+
 Production renderer and Electron outputs are written to `out/`. Packaged artifacts are
 written to `release/`. The builder configuration sets:
 
@@ -148,13 +160,21 @@ Use any of these paths:
 
 - **File > Open**, `Ctrl+O` on Windows, or `⌘O` on macOS
 - The **Open** button on the welcome screen or header
-- Drop one `.excalidraw` file onto the application window
-- Launch `ExcalidrawVisualizer.exe C:\path\drawing.excalidraw`
-- Launch the macOS app with `/Applications/Excalidraw\ Visualizer.app/Contents/MacOS/ExcalidrawVisualizer /path/drawing.excalidraw`
+- Select or drop one or more `.excalidraw` files
+- Launch `ExcalidrawVisualizer.exe C:\drawings\overview.excalidraw C:\drawings\details.excalidraw`
+- Launch the macOS app with `/Applications/Excalidraw\ Visualizer.app/Contents/MacOS/ExcalidrawVisualizer /drawings/overview.excalidraw`
 - Open an associated `.excalidraw` file after installing the packaged application
 
-A second application launch forwards its file to the existing window and focuses it.
-Opening another file while the active drawing is dirty requires confirmation.
+Each drawing opens in its own tab and keeps its autosave, watcher, merge, and
+conflict state while hidden. Drag tabs to reorder them. Drop a tab on the
+right-side target, or right-click it and choose **Move to Side View**, to keep
+two drawings visible at once. Right-click and choose **Open in New Window** to
+move a drawing to another secured application window. A second application
+launch forwards all supplied drawing paths to the focused window as tabs.
+
+Closing a tab with unsaved changes or a conflict requires confirmation.
+Detaching a dirty tab saves it first; unresolved conflicts must be resolved
+before the tab can move to another window.
 
 ## Colors and appearance
 
@@ -172,8 +192,9 @@ actions.
 
 ## External watcher behavior
 
-The main process watches the active file's parent directory so replacement-by-rename is
-observed as reliably as direct writes. Each candidate is read and fingerprinted:
+The main process gives every open drawing an independent watcher for its parent
+directory, so replacement-by-rename is observed as reliably as direct writes.
+Each candidate is read and fingerprinted:
 
 1. A fingerprint matching an application write is ignored as an echo.
 2. Duplicate filesystem events with identical content are ignored.
@@ -245,10 +266,10 @@ GitHub Actions follows the same public-release pattern as FeedbackRecorder:
 
 - Pull requests and `main` run tests, type-checking, linting, Windows and macOS
   packaging smoke tests, and Gitleaks scans of files and Git history.
-- The macOS smoke test launches the packaged native app, opens a real
-  `.excalidraw` path, checks both canvas layers, exercises an external atomic
-  update and an application save, and rejects renderer errors or remote
-  requests.
+- The packaged runtime smoke test launches the native app with two real
+  `.excalidraw` paths, checks tab and split-pane canvas dimensions, exercises a
+  path-isolated external update, application save, and detached window, and
+  rejects renderer errors or remote requests.
 - Every push to `main` refreshes the rolling `latest` release and uploads
   fixed-name Windows and macOS downloads.
 - A semantic version tag such as `v0.2.0` publishes a permanent release whose filenames
@@ -274,12 +295,12 @@ notarization are the next macOS distribution priorities.
 
 ```text
 src/
-  main/       Electron lifecycle, menus, dialogs, filesystem, atomic saves, watcher
+  main/       Multi-window lifecycle, dialogs, per-window controllers, atomic saves
   preload/    Narrow typed contextBridge API
-  renderer/   React shell and official Excalidraw component
-  shared/     IPC contracts, scene validation, renderer-independent three-way merge
+  renderer/   Tab/split workspace and per-document Excalidraw editors
+  shared/     IPC contracts, scene/merge logic, pure workspace reducer
 tests/        Vitest unit and temporary-directory watcher integration tests
-scripts/      Reproducible local Excalidraw asset preparation
+scripts/      Asset preparation and packaged runtime smoke coverage
 build/        Application and file-association icons
 .github/      Pull-request CI and rolling/versioned release workflows
 ```

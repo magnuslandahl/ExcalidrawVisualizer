@@ -4,23 +4,23 @@ import { mkdtemp, readFile, rename, rm, stat, writeFile } from 'node:fs/promises
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
-import WebSocket from 'ws'
 
-const appPathArgument = process.argv[2]
+const packagePathArgument = process.argv[2]
+const WebSocketClient = globalThis.WebSocket
 
-if (process.platform !== 'darwin') {
-  throw new Error('The packaged macOS smoke test must run on macOS')
+if (!packagePathArgument) {
+  throw new Error(
+    'Usage: npm run smoke:packaged -- <path-to-app-or-executable>'
+  )
 }
-if (!appPathArgument) {
-  throw new Error('Usage: npm run smoke:mac -- release/mac-arm64/ExcalidrawVisualizer.app')
+if (typeof WebSocketClient !== 'function') {
+  throw new Error('This smoke test requires Node.js with built-in WebSocket support')
 }
-const appPath = resolve(appPathArgument)
-const executablePath = join(
-  appPath,
-  'Contents',
-  'MacOS',
-  'ExcalidrawVisualizer'
-)
+const packagePath = resolve(packagePathArgument)
+const executablePath =
+  process.platform === 'darwin'
+    ? join(packagePath, 'Contents', 'MacOS', 'ExcalidrawVisualizer')
+    : packagePath
 
 await stat(executablePath)
 
@@ -61,6 +61,7 @@ const sceneWithBackground = (viewBackgroundColor) => ({
 
 const tempRoot = await mkdtemp(join(tmpdir(), 'excalidraw-visualizer-smoke-'))
 const scenePath = join(tempRoot, 'packaged-smoke.excalidraw')
+const secondScenePath = join(tempRoot, 'packaged-smoke-second.excalidraw')
 const profilePath = join(tempRoot, 'profile')
 const debuggingPort = await getAvailablePort()
 const processOutput = []
@@ -70,13 +71,19 @@ await writeFile(
   `${JSON.stringify(sceneWithBackground('#ffffff'), null, 2)}\n`,
   'utf8'
 )
+await writeFile(
+  secondScenePath,
+  `${JSON.stringify(sceneWithBackground('#fff4e6'), null, 2)}\n`,
+  'utf8'
+)
 
 const child = spawn(
   executablePath,
   [
     `--remote-debugging-port=${debuggingPort}`,
     `--user-data-dir=${profilePath}`,
-    scenePath
+    scenePath,
+    secondScenePath
   ],
   {
     env: {
@@ -181,7 +188,7 @@ const connectToRenderer = async () => {
           candidate.webSocketDebuggerUrl
       )
       if (target) {
-        const socket = new WebSocket(target.webSocketDebuggerUrl)
+        const socket = new WebSocketClient(target.webSocketDebuggerUrl)
         await new Promise((resolveSocket, rejectSocket) => {
           socket.addEventListener('open', resolveSocket, { once: true })
           socket.addEventListener('error', rejectSocket, { once: true })
@@ -214,6 +221,15 @@ const readRendererState = (connection) =>
       documentName: document.querySelector('.document-identity strong')?.textContent ?? '',
       documentPath: document.querySelector('.document-identity span')?.getAttribute('title') ?? '',
       status: document.querySelector('.status')?.textContent?.trim() ?? '',
+      tabs: [...document.querySelectorAll('.drawing-tab')].map((tab) => ({
+        name: tab.querySelector('.tab-label')?.textContent ?? '',
+        selected: tab.getAttribute('aria-selected') === 'true'
+      })),
+      split: document.querySelector('.workspace')?.classList.contains('workspace--split') ?? false,
+      visibleEditors: [...document.querySelectorAll('.editor-slot--active')].map((editor) => ({
+        shell: rect(editor.querySelector('.canvas-shell')),
+        canvases: [...editor.querySelectorAll('canvas')].map(rect)
+      })),
       workspace: rect(document.querySelector('.workspace')),
       canvasShell: rect(document.querySelector('.canvas-shell')),
       canvases: [...document.querySelectorAll('.canvas-shell canvas')].map(rect),
@@ -252,8 +268,11 @@ try {
     (state) =>
       state.readyState === 'complete' &&
       state.preloadBridge &&
-      state.documentName === basename(scenePath) &&
-      state.documentPath === scenePath &&
+      state.documentName === basename(secondScenePath) &&
+      state.documentPath === secondScenePath &&
+      state.tabs.length === 2 &&
+      state.tabs.some((tab) => tab.name === basename(scenePath)) &&
+      state.tabs.some((tab) => tab.name === basename(secondScenePath)) &&
       state.workspace?.width > 0 &&
       state.workspace?.height > 0 &&
       state.canvasShell?.width > 0 &&
@@ -261,7 +280,49 @@ try {
       state.canvases.filter(
         (canvas) => canvas?.width > 0 && canvas?.height > 0
       ).length >= 2,
-    'the launch-path drawing and non-zero canvas layers'
+    'both launch-path tabs and non-zero canvas layers'
+  )
+
+  await connection.evaluate(`(() => {
+    const firstTab = document.querySelector('.drawing-tab')
+    if (!(firstTab instanceof HTMLElement)) {
+      throw new Error('The first drawing tab is unavailable')
+    }
+    firstTab.dispatchEvent(new MouseEvent('contextmenu', {
+      bubbles: true,
+      clientX: 100,
+      clientY: 70
+    }))
+  })()`)
+  await waitFor(
+    () =>
+      connection.evaluate(`(() => {
+        const moveButton = [...document.querySelectorAll('.tab-context-menu button')]
+          .find((button) => button.textContent?.includes('Move to Side View'))
+        if (moveButton instanceof HTMLButtonElement) {
+          moveButton.click()
+          return true
+        }
+        return false
+      })()`),
+    Boolean,
+    'the side-view context-menu command'
+  )
+
+  await waitFor(
+    () => readRendererState(connection),
+    (state) =>
+      state.split &&
+      state.visibleEditors.length === 2 &&
+      state.visibleEditors.every(
+        (editor) =>
+          editor.shell?.width > 0 &&
+          editor.shell?.height > 0 &&
+          editor.canvases.filter(
+            (canvas) => canvas?.width > 0 && canvas?.height > 0
+          ).length >= 2
+      ),
+    'two visible drawing panes with non-zero canvas layers'
   )
 
   const replacementPath = join(tempRoot, '.packaged-smoke-replacement')
@@ -274,8 +335,10 @@ try {
 
   await waitFor(
     () => readRendererState(connection),
-    (state) => state.canvasBackground === '#f0e8ff',
-    'the atomic external update'
+    (state) =>
+      state.documentPath === scenePath &&
+      state.canvasBackground === '#f0e8ff',
+    'the external update routed to its drawing tab'
   )
 
   await connection.evaluate(`(() => {
@@ -299,6 +362,48 @@ try {
     },
     (background) => background === '#dbeafe',
     'the packaged application save'
+  )
+
+  await connection.evaluate(`(() => {
+    const selectedTab = document.querySelector('.drawing-tab[aria-selected="true"]')
+    if (!(selectedTab instanceof HTMLElement)) {
+      throw new Error('The selected drawing tab is unavailable')
+    }
+    selectedTab.dispatchEvent(new MouseEvent('contextmenu', {
+      bubbles: true,
+      clientX: 120,
+      clientY: 70
+    }))
+  })()`)
+  await waitFor(
+    () =>
+      connection.evaluate(`(() => {
+        const detachButton = [...document.querySelectorAll('.tab-context-menu button')]
+          .find((button) => button.textContent?.includes('Open in New Window'))
+        if (detachButton instanceof HTMLButtonElement) {
+          detachButton.click()
+          return true
+        }
+        return false
+      })()`),
+    Boolean,
+    'the new-window context-menu command'
+  )
+
+  await waitFor(
+    async () => {
+      const response = await fetch(
+        `http://127.0.0.1:${debuggingPort}/json/list`
+      )
+      const targets = await response.json()
+      const state = await readRendererState(connection)
+      return {
+        pageTargets: targets.filter((target) => target.type === 'page').length,
+        originalTabs: state.tabs.length
+      }
+    },
+    (state) => state.pageTargets === 2 && state.originalTabs === 1,
+    'tab detachment into a second application window'
   )
 
   const finalState = await readRendererState(connection)
@@ -330,13 +435,15 @@ try {
   console.log(
     JSON.stringify(
       {
-        app: appPath,
+        package: packagePath,
         architecture: process.arch,
         preloadBridge: true,
-        launchPath: true,
+        launchPathTabs: initialState.tabs.length,
         canvasLayers: initialState.canvases.length,
+        splitView: true,
         externalAtomicUpdate: true,
         applicationSave: true,
+        detachedWindow: true,
         remoteRequests: remoteResources.length,
         rendererErrors: protocolErrors.length
       },

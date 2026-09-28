@@ -1,6 +1,6 @@
 {
   "name": "excalidraw-visualizer",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Offline Electron editor and live viewer for Excalidraw files",
   "main": "./out/main/index.js",
   "type": "module",
@@ -36,7 +36,8 @@
     "package:mac": "npm run build && electron-builder --mac dmg --arm64 --x64 --publish never",
     "package:dir": "npm run build && electron-builder --dir --publish never",
     "package:mac:dir": "npm run build && electron-builder --mac --dir --publish never",
-    "smoke:mac": "node scripts/smoke-packaged-macos.mjs"
+    "smoke:packaged": "node scripts/smoke-packaged.mjs",
+    "smoke:mac": "node scripts/smoke-packaged.mjs"
   },
   "dependencies": {
     "@excalidraw/excalidraw": "0.18.1",
@@ -60,7 +61,6 @@
     "typescript": "5.9.3",
     "typescript-eslint": "8.70.1",
     "vite": "7.3.6",
-    "vitest": "5.0.1",
-    "ws": "8.18.3"
+    "vitest": "5.0.1"
   }
 }

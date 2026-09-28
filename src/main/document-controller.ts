@@ -6,7 +6,12 @@ import { atomicWriteFile } from './atomic-write'
 import { ActiveFileWatcher, type FileWatcherEvent } from './file-watcher'
 import { fingerprint } from './fingerprint'
 import type { RecentFiles } from './recent-files'
-import { ipcChannels, type DocumentEvent, type SaveResult } from '../shared/contracts'
+import {
+  ipcChannels,
+  type DocumentEvent,
+  type OpenedDocument,
+  type SaveResult
+} from '../shared/contracts'
 import {
   parseSceneText,
   serializeScene,
@@ -19,12 +24,32 @@ type ControllerOptions = {
   onRecentFilesChanged: () => void
 }
 
+type WatchedDocument = {
+  path: string
+  watcher: ActiveFileWatcher
+}
+
+const pathKey = (path: string): string =>
+  process.platform === 'win32' ? path.toLowerCase() : path
+
+export const validateExcalidrawPath = (requestedPath: string): string => {
+  if (typeof requestedPath !== 'string' || requestedPath.length === 0) {
+    throw new TypeError('A file path is required')
+  }
+  if (!isAbsolute(requestedPath)) {
+    throw new TypeError('Only absolute file paths are accepted')
+  }
+  if (extname(requestedPath).toLowerCase() !== '.excalidraw') {
+    throw new TypeError('Only .excalidraw files are supported')
+  }
+  return normalize(requestedPath)
+}
+
 export class DocumentController {
   readonly #getWindow: () => BrowserWindow | undefined
   readonly #recentFiles: RecentFiles
   readonly #onRecentFilesChanged: () => void
-  #activePath: string | undefined
-  #watcher: ActiveFileWatcher | undefined
+  readonly #documents = new Map<string, WatchedDocument>()
 
   constructor(options: ControllerOptions) {
     this.#getWindow = options.getWindow
@@ -32,52 +57,63 @@ export class DocumentController {
     this.#onRecentFilesChanged = options.onRecentFilesChanged
   }
 
-  async showOpenDialog(): Promise<boolean> {
+  async showOpenDialog(): Promise<OpenedDocument[]> {
     const window = this.#getWindow()
     if (!window) {
-      return false
+      return []
     }
     const result = await dialog.showOpenDialog(window, {
-      title: 'Open Excalidraw file',
-      properties: ['openFile'],
+      title: 'Open Excalidraw files',
+      properties: ['openFile', 'multiSelections'],
       filters: [{ name: 'Excalidraw drawings', extensions: ['excalidraw'] }]
     })
-    const selectedPath = result.filePaths[0]
-    return selectedPath ? this.openPath(selectedPath) : false
+    const existingKeys = new Set(this.#documents.keys())
+    const opened: OpenedDocument[] = []
+    try {
+      for (const path of result.filePaths) {
+        opened.push(await this.openPath(path))
+      }
+      return opened
+    } catch (error) {
+      await Promise.all(
+        opened
+          .filter(({ path }) => !existingKeys.has(pathKey(path)))
+          .map(({ path }) => this.closeDocument(path))
+      )
+      throw error
+    }
   }
 
-  async openPath(requestedPath: string): Promise<boolean> {
-    const path = this.#validatePath(requestedPath)
-    const content = await readFile(path, 'utf8')
-    const scene = parseSceneText(content)
-    const contentFingerprint = fingerprint(content)
-
-    await this.#replaceWatcher(path, contentFingerprint)
-    this.#activePath = path
+  async openPath(requestedPath: string): Promise<OpenedDocument> {
+    const validatedPath = validateExcalidrawPath(requestedPath)
+    const path =
+      this.#documents.get(pathKey(validatedPath))?.path ?? validatedPath
+    const document = await this.#readDocument(path)
+    await this.#ensureWatcher(path, document.fingerprint)
     await this.#recordRecent(path)
-    this.#send({
-      type: 'opened',
-      document: { path, scene, fingerprint: contentFingerprint }
-    })
-    return true
+    return document
   }
 
-  async reload(): Promise<boolean> {
-    return this.#activePath ? this.openPath(this.#activePath) : false
+  async reload(requestedPath: string): Promise<OpenedDocument> {
+    return this.openPath(requestedPath)
   }
 
-  async save(scene: ExcalidrawScene): Promise<SaveResult> {
-    return this.#activePath ? this.#writeScene(this.#activePath, scene, false) : this.saveAs(scene)
+  async save(path: string, scene: ExcalidrawScene): Promise<SaveResult> {
+    return this.#writeScene(validateExcalidrawPath(path), scene)
   }
 
-  async saveAs(scene: ExcalidrawScene): Promise<SaveResult> {
+  async saveAs(
+    currentPath: string,
+    scene: ExcalidrawScene
+  ): Promise<SaveResult> {
+    const sourcePath = validateExcalidrawPath(currentPath)
     const window = this.#getWindow()
     if (!window) {
       return { ok: false, message: 'The application window is unavailable' }
     }
     const result = await dialog.showSaveDialog(window, {
       title: 'Save Excalidraw file',
-      defaultPath: this.#activePath ?? 'Untitled.excalidraw',
+      defaultPath: sourcePath,
       filters: [{ name: 'Excalidraw drawings', extensions: ['excalidraw'] }]
     })
     if (result.canceled || !result.filePath) {
@@ -87,19 +123,48 @@ export class DocumentController {
     const requestedPath = result.filePath.toLowerCase().endsWith('.excalidraw')
       ? result.filePath
       : `${result.filePath}.excalidraw`
-    const path = this.#validatePath(requestedPath)
-    return this.#writeScene(path, scene, path !== this.#activePath)
+    const destinationPath = validateExcalidrawPath(requestedPath)
+    const sourceKey = pathKey(sourcePath)
+    const destinationKey = pathKey(destinationPath)
+    if (sourceKey !== destinationKey && this.#documents.has(destinationKey)) {
+      return {
+        ok: false,
+        message: 'That drawing is already open in this window'
+      }
+    }
+    return this.#writeScene(destinationPath, scene, sourcePath)
+  }
+
+  async closeDocument(requestedPath: string): Promise<void> {
+    const path = validateExcalidrawPath(requestedPath)
+    const key = pathKey(path)
+    const document = this.#documents.get(key)
+    if (!document) {
+      return
+    }
+    this.#documents.delete(key)
+    await document.watcher.close()
   }
 
   async close(): Promise<void> {
-    await this.#watcher?.close()
-    this.#watcher = undefined
+    const documents = [...this.#documents.values()]
+    this.#documents.clear()
+    await Promise.all(documents.map(({ watcher }) => watcher.close()))
+  }
+
+  async #readDocument(path: string): Promise<OpenedDocument> {
+    const content = await readFile(path, 'utf8')
+    return {
+      path,
+      scene: parseSceneText(content),
+      fingerprint: fingerprint(content)
+    }
   }
 
   async #writeScene(
     path: string,
     sceneCandidate: ExcalidrawScene,
-    switchActiveFile: boolean
+    previousPath?: string
   ): Promise<SaveResult> {
     let content: string
     try {
@@ -111,15 +176,16 @@ export class DocumentController {
     }
 
     const contentFingerprint = fingerprint(content)
-    const activeWatcher = !switchActiveFile ? this.#watcher : undefined
+    const key = pathKey(path)
 
     try {
       await atomicWriteFile(path, content)
-      activeWatcher?.markOwnWrite(contentFingerprint)
-      if (switchActiveFile || !this.#watcher) {
-        await this.#replaceWatcher(path, contentFingerprint)
+      const existing = this.#documents.get(key)
+      existing?.watcher.markOwnWrite(contentFingerprint)
+      await this.#ensureWatcher(path, contentFingerprint)
+      if (previousPath && pathKey(previousPath) !== key) {
+        await this.closeDocument(previousPath)
       }
-      this.#activePath = path
       await this.#recordRecent(path)
       this.#send({ type: 'save-complete', path, fingerprint: contentFingerprint })
       return { ok: true, path, fingerprint: contentFingerprint }
@@ -130,13 +196,20 @@ export class DocumentController {
     }
   }
 
-  async #replaceWatcher(path: string, initialFingerprint: string): Promise<void> {
-    await this.#watcher?.close()
+  async #ensureWatcher(path: string, initialFingerprint: string): Promise<void> {
+    const key = pathKey(path)
+    if (this.#documents.has(key)) {
+      return
+    }
     const watcher = new ActiveFileWatcher(path, {
       onEvent: (event) => this.#handleWatcherEvent(path, event)
     })
     await watcher.start(initialFingerprint)
-    this.#watcher = watcher
+    if (this.#documents.has(key)) {
+      await watcher.close()
+      return
+    }
+    this.#documents.set(key, { path, watcher })
   }
 
   #handleWatcherEvent(path: string, event: FileWatcherEvent): void {
@@ -155,19 +228,6 @@ export class DocumentController {
   async #recordRecent(path: string): Promise<void> {
     await this.#recentFiles.add(path)
     this.#onRecentFilesChanged()
-  }
-
-  #validatePath(requestedPath: string): string {
-    if (typeof requestedPath !== 'string' || requestedPath.length === 0) {
-      throw new TypeError('A file path is required')
-    }
-    if (!isAbsolute(requestedPath)) {
-      throw new TypeError('Only absolute file paths are accepted')
-    }
-    if (extname(requestedPath).toLowerCase() !== '.excalidraw') {
-      throw new TypeError('Only .excalidraw files are supported')
-    }
-    return normalize(requestedPath)
   }
 
   #send(event: DocumentEvent): void {
