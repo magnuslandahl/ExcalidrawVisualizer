@@ -496,12 +496,21 @@ Implemented:
 
 Near-term plan:
 
-1. Add Apple Developer ID signing, hardened runtime, and notarization when the
+1. Follow [the agent feedback planning baseline](docs/AGENT-FEEDBACK-PROPOSAL.md),
+   starting with a same-session GitHub Copilot desktop feasibility check. The
+   proposed workflow includes multiple drawings, anchored feedback, bundled local
+   Swedish/English dictation, and automatic queue processing when ready and idle.
+   This is documentation only so far. Do not implement against an assumed desktop
+   API or treat MCP notifications as proof that a conversation will start a turn.
+   The proposal identifies future scoped policy changes for microphone capture
+   and user-submitted context; current security/offline rules still apply until
+   implementation explicitly updates and validates those boundaries.
+2. Add Apple Developer ID signing, hardened runtime, and notarization when the
    required certificate and credentials are available.
-2. Add Windows code signing when a certificate is available.
-3. Replace placeholder application/file icons with final original artwork.
-4. Add privacy-safe screenshots after final branding is available.
-5. Gather public feedback before expanding the merge model further.
+3. Add Windows code signing when a certificate is available.
+4. Replace placeholder application/file icons with final original artwork.
+5. Add privacy-safe screenshots after final branding is available.
+6. Gather public feedback before expanding the merge model further.
 
 Possible later work, not current commitments:
 
