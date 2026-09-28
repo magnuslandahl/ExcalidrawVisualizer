@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 
 const packagePathArgument = process.argv[2]
+const shouldCheckUpdates = process.argv.includes('--check-update')
 const WebSocketClient = globalThis.WebSocket
 
 if (!packagePathArgument) {
@@ -233,9 +234,15 @@ const readRendererState = (connection) =>
           editor.querySelector('.document-identity span')?.getAttribute('title') ===
           targetPath
       ) ?? activeEditors[0] ?? null
+    const tabStrip = document.querySelector('.document-tab-strip')
     return {
       readyState: document.readyState,
-      preloadBridge: typeof window.desktop?.openPath === 'function',
+      preloadBridge:
+        typeof window.desktop?.openPath === 'function' &&
+        typeof window.desktop?.checkForUpdates === 'function',
+      appVersion: document.querySelector('.app-version')?.textContent?.trim() ?? '',
+      updateLabel: document.querySelector('.update-button')?.textContent?.trim() ?? '',
+      tabOverflowY: tabStrip ? getComputedStyle(tabStrip).overflowY : '',
       documentName:
         targetEditor?.querySelector('.document-identity strong')?.textContent ?? '',
       documentPath:
@@ -280,6 +287,7 @@ const waitFor = async (readValue, isReady, description) => {
 }
 
 let connection
+let manualUpdateState = 'not-requested'
 
 try {
   connection = await connectToRenderer()
@@ -294,6 +302,9 @@ try {
     (state) =>
       state.readyState === 'complete' &&
       state.preloadBridge &&
+      /^\d+\.\d+\.\d+/.test(state.appVersion) &&
+      state.updateLabel === 'Check for updates' &&
+      state.tabOverflowY === 'hidden' &&
       [scenePath, secondScenePath].includes(state.documentPath) &&
       state.tabs.length === 2 &&
       state.tabs.some((tab) => tab.name === basename(scenePath)) &&
@@ -308,6 +319,25 @@ try {
       ).length >= 2,
     'both launch-path tabs and non-zero canvas layers'
   )
+
+  if (shouldCheckUpdates) {
+    await connection.evaluate(`(() => {
+      const button = document.querySelector('.update-button')
+      if (!(button instanceof HTMLButtonElement)) {
+        throw new Error('The update control is unavailable')
+      }
+      button.click()
+    })()`)
+    manualUpdateState = await waitFor(
+      () =>
+        connection.evaluate(
+          `document.querySelector('.update-button')?.textContent?.trim() ?? ''`
+        ),
+      (label) =>
+        label === 'No update available' || label.startsWith('Install '),
+      'the manual update check'
+    )
+  }
 
   await connection.evaluate(`(() => {
     const targetName = ${JSON.stringify(basename(scenePath))}
@@ -474,6 +504,10 @@ try {
         package: packagePath,
         architecture: process.arch,
         preloadBridge: true,
+        appVersion: finalState.appVersion,
+        updateControl: finalState.updateLabel,
+        manualUpdateCheck: manualUpdateState,
+        tabOverflowHidden: finalState.tabOverflowY === 'hidden',
         launchPathTabs: initialState.tabs.length,
         canvasLayers: initialState.canvases.length,
         splitView: true,

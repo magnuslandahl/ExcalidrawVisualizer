@@ -62,6 +62,7 @@ The packages are currently unsigned for distribution.
 - Embedded image/file-map preservation and merging
 - Explicit Fit to Content without resetting the viewport on normal external updates
 - System, light, and dark application themes with a remembered preference
+- Running version and an explicit, checksum-verified update control in the toolbar
 - Arbitrary canvas background colors saved as normal Excalidraw document state
 - Standard Excalidraw stroke and fill palettes whenever an element is selected
 - Local feedback drafts anchored to selected elements, points, rectangular regions, or
@@ -89,10 +90,22 @@ microphone permission or transcription fails.
 
 To deliver feedback directly to the intended GitHub Copilot task:
 
-1. Open the **Excalidraw Visualizer Companion** canvas in that Copilot task.
-2. Choose **Copy one-time pairing code**.
-3. In Visualizer, open **Comments**, paste the code under **Copilot task**, and pair.
-4. Compose feedback and choose **Queue for paired task** or **Send now**.
+1. In Visualizer, open **Comments** and choose **Install Copilot companion**.
+   Restart GitHub Copilot or open a new task after installation or an update.
+2. Open the **Excalidraw Visualizer Companion** canvas in the intended Copilot
+   task.
+3. Choose **Copy one-time pairing code**.
+4. In Visualizer, paste the code under **Copilot task** and pair.
+5. Compose feedback and choose **Queue for paired task** or **Send now**.
+
+The installer copies the companion shipped with Visualizer into the current
+user's Copilot extension directory, so it is available from every repository.
+It honors `COPILOT_HOME` when configured and otherwise uses the standard
+`.copilot` directory in the user's home directory. Visualizer updates only
+copies that it installed itself and refuses to overwrite an extension with the
+same name that is managed separately. Contributors working in this repository
+also receive the checked-in project extension automatically; that project copy
+takes precedence over the user-wide copy for this checkout.
 
 Pairing capabilities expire after five minutes and connection secrets remain in memory
 only. Restarting either side requires explicit re-pairing. **Accepted** means Copilot
@@ -105,6 +118,25 @@ Visualizer does not scan, infer, activate, or create Copilot tasks. The tested h
 exposes no supported global task discovery route, so pairing must begin inside the
 intended task. The [agent feedback proposal](docs/AGENT-FEEDBACK-PROPOSAL.md) and
 [Stage 0 capability record](docs/AGENT-FEEDBACK-STAGE0.md) document that boundary.
+
+## Version and updates
+
+The application header shows the running semantic version. **Check for updates**
+is manual: Visualizer makes no update request at startup and remains fully usable
+offline. When clicked, it checks the rolling `latest` release in this GitHub
+repository and shows **No update available** when the running version is current.
+
+For a newer version, the same control downloads the correct Windows x64 or macOS
+architecture package, verifies it against the release's `SHA256SUMS.txt`, and
+installs it. Windows launches the per-user NSIS upgrade. A writable installed
+macOS application stages and swaps the verified app bundle, then reopens it; a
+copy that cannot replace itself opens the verified DMG instead. Visualizer refuses
+to start installation while any drawing has unsaved changes or an unresolved
+conflict.
+
+Update traffic is limited to the public GitHub release API and immutable release
+assets after the user clicks the control. No drawing, feedback, or application
+state is included in those requests.
 
 ## Requirements
 
@@ -187,6 +219,8 @@ written to `release/`. The builder configuration sets:
 - Windows targets: x64 NSIS installer and x64 portable executable
 - macOS targets: Apple silicon and Intel x64 DMGs for macOS 13 or newer
 - `.excalidraw` file association
+- a bundled Copilot companion that can be installed user-wide from the Comments
+  panel
 
 The current builds use a simple project icon from `build/`; it can be replaced with final
 branding without changing the package layout. Production signing and macOS notarization

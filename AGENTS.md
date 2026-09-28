@@ -91,7 +91,10 @@ adopts those principles for its supported Windows and macOS packages.
 ### Local and offline
 
 - No application feature may require a remote server.
-- Do not add telemetry, analytics, update checks, remote fonts, or CDN assets.
+- Do not add telemetry, analytics, background update checks, remote fonts, or
+  CDN assets. The only update network access is an explicit user-triggered check
+  against this repository's public GitHub release API followed by immutable
+  release-asset and checksum downloads.
 - Network navigation, popup creation, and Electron permission requests remain
   denied.
 - Local files may contain private architecture and product information. Never
@@ -153,6 +156,10 @@ execute the emitted ESM preload bundle.
 - The application header contains theme, New, and Open controls. Each document
   toolbar shows its file, save/watch status, comments, canvas color, Fit to
   Content, and Reload controls.
+- The application header shows the running version and an explicit update
+  control. It does not contact GitHub until clicked. A current build reports
+  `No update available`; a newer Windows/macOS package is downloaded, verified
+  against `SHA256SUMS.txt`, and installed or opened as appropriate.
 - Application appearance can be System, Light, or Dark and is remembered
   locally.
 - Canvas background color is document state and is saved in the
@@ -174,6 +181,10 @@ execute the emitted ESM preload bundle.
   the intended Copilot task. Queue and Send now create immutable SQLite-backed
   attempts and show accepted, consumed, reply-observed, idle-after-turn,
   rejected, unknown, and retired states without conflating them.
+- The Comments panel installs or updates the companion from a packaged,
+  immutable resource into the current user's Copilot extensions directory.
+  Installation is explicit, user-wide, and refuses to overwrite an unmanaged
+  same-named extension. A new Copilot task or restart activates changes.
 - Feedback dictation is explicitly activated, editable before copying, and
   processed offline through bundled English/Swedish multilingual Whisper assets.
   Typed text survives permission denial, cancellation, silence, or engine
@@ -245,6 +256,15 @@ secrets.
 only to an exact `127.0.0.1` endpoint, maintains secrets in memory, serializes
 dispatch, polls generation-scoped receipts, and blocks queued replay after an
 unknown admission until the user explicitly retires it.
+`src/main/copilot-companion-installer.ts` compares the fixed bundled companion
+with the user-scoped Copilot extension, installs or updates only
+Visualizer-managed copies through atomic file replacement, and never accepts a
+renderer-supplied filesystem path.
+`src/main/update-service.ts` checks only the fixed rolling GitHub release,
+selects an exact supported-platform asset, binds the renderer-visible choice to
+immutable release asset IDs, verifies `SHA256SUMS.txt`, and installs through the
+platform-specific path. It refuses in-place installation while any document is
+dirty and does not expose download URLs or checksums to the renderer.
 `src/main/dictation-service.ts` serializes native Whisper jobs, validates bounded
 PCM WAV input, uses unique temporary paths, supports cancellation, limits
 process/output size, and removes completed or orphaned owned job directories.
@@ -417,6 +437,10 @@ Outputs:
   Intel applications.
 - `release/*.dmg` contains the Apple silicon and Intel disk images.
 
+Packaged applications also carry the checked-in
+`.github/extensions/excalidraw-visualizer-companion` directory as an immutable
+resource for explicit user-wide installation from the Comments panel.
+
 These paths are generated and ignored.
 
 ## Testing expectations
@@ -432,6 +456,8 @@ The focused Vitest suite currently covers:
 - deletion-versus-modification conflicts
 - embedded file-map merging
 - dirty-document merge behavior
+- update version ordering, platform asset selection, trusted immutable asset
+  URLs, and checksum parsing/comparison
 - canonical multi-document open, retained reopen, Save As identity, cancel, and
   symlink behavior
 - feedback schema validation, atomic persistence, immutable submissions, and
@@ -503,6 +529,10 @@ Both channels build:
 - macOS Apple silicon DMG
 - macOS Intel x64 DMG
 - `SHA256SUMS.txt`
+
+The in-app updater reads the rolling `latest` release only after an explicit
+click. Every update-capable release must advance `package.json` semantically;
+same-version rolling rebuilds are intentionally not treated as upgrades.
 
 Workflow artifacts are retained for 14 days even before release publication.
 Packages are currently unsigned for distribution; documentation must keep the

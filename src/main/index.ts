@@ -1,12 +1,14 @@
-import { basename, join } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import { app, BrowserWindow, clipboard, dialog, ipcMain, session } from 'electron'
 import { DictationService } from './dictation-service'
 import { AgentFeedbackService } from './agent-feedback-service'
+import { CopilotCompanionInstaller } from './copilot-companion-installer'
 import { DocumentRegistry } from './document-registry'
 import { FeedbackStore } from './feedback-store'
 import { feedbackDocumentStorageKey } from './feedback-document'
 import { installApplicationMenu } from './menu'
 import { RecentFiles } from './recent-files'
+import { UpdateService } from './update-service'
 import {
   ipcChannels,
   type AppCommand,
@@ -42,8 +44,10 @@ const agentDocumentRoutes = new Map<string, Map<number, string>>()
 const pendingLaunchPaths: string[] = []
 let feedbackStore: FeedbackStore | undefined
 let agentFeedbackService: AgentFeedbackService | undefined
+let copilotCompanionInstaller: CopilotCompanionInstaller | undefined
 let dictationService: DictationService | undefined
 let recentFiles: RecentFiles | undefined
+let updateService: UpdateService | undefined
 
 const getExcalidrawPaths = (argv: readonly string[]): string[] =>
   argv.filter((argument) => argument.toLowerCase().endsWith('.excalidraw'))
@@ -115,6 +119,31 @@ const refreshApplicationMenu = (): void => {
     getActiveDocumentId: () => getPreferredContext()?.activeDocumentId ?? null,
     recentFiles
   })
+}
+
+const hasDirtyDocuments = (): boolean =>
+  [...windows.values()].some((context) =>
+    [...context.dirtyDocuments.values()].some(Boolean)
+  )
+
+const prepareToQuitForUpdate = (): (() => void) => {
+  if (hasDirtyDocuments()) {
+    throw new Error(
+      'Save or discard all drawing changes before installing an update'
+    )
+  }
+  const previous = [...windows.values()].map((context) => ({
+    context,
+    allowClose: context.allowClose
+  }))
+  for (const { context } of previous) {
+    context.allowClose = true
+  }
+  return () => {
+    for (const { context, allowClose } of previous) {
+      context.allowClose = allowClose
+    }
+  }
 }
 
 const attachWindowGuards = (context: WindowContext): void => {
@@ -617,6 +646,44 @@ const registerIpc = (): void => {
       return agentFeedbackService.retireAttempt(attemptId)
     }
   )
+  ipcMain.handle(ipcChannels.companionStatus, () => {
+    if (!copilotCompanionInstaller) {
+      throw new Error('The Copilot companion installer is unavailable')
+    }
+    return copilotCompanionInstaller.getStatus()
+  })
+  ipcMain.handle(ipcChannels.companionInstall, () => {
+    if (!copilotCompanionInstaller) {
+      throw new Error('The Copilot companion installer is unavailable')
+    }
+    return copilotCompanionInstaller.install()
+  })
+  ipcMain.handle(ipcChannels.appVersion, () => app.getVersion())
+  ipcMain.handle(ipcChannels.updateCheck, () => {
+    if (!updateService) {
+      throw new Error('The update service is unavailable')
+    }
+    return updateService.check()
+  })
+  ipcMain.handle(ipcChannels.updateInstall, (event, asset: unknown) => {
+    if (!updateService) {
+      throw new Error('The update service is unavailable')
+    }
+    if (hasDirtyDocuments()) {
+      throw new Error(
+        'Save or discard all drawing changes before installing an update'
+      )
+    }
+    return updateService.install(
+      asset,
+      (progress) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send(ipcChannels.updateProgress, progress)
+        }
+      },
+      prepareToQuitForUpdate
+    )
+  })
   ipcMain.handle(ipcChannels.rendererReady, (event) => {
     const context = requireWindowContext(event.sender)
     context.registry.resetRendererVisibility()
@@ -663,6 +730,26 @@ const initialize = async (): Promise<void> => {
     feedbackStore,
     broadcastAgentEvent
   )
+  const companionSourceDirectory = app.isPackaged
+    ? join(
+        process.resourcesPath,
+        'copilot-extension',
+        'excalidraw-visualizer-companion'
+      )
+    : resolve(
+        app.getAppPath(),
+        '.github',
+        'extensions',
+        'excalidraw-visualizer-companion'
+      )
+  const copilotHome = process.env.COPILOT_HOME
+    ? resolve(process.env.COPILOT_HOME)
+    : join(app.getPath('home'), '.copilot')
+  copilotCompanionInstaller = new CopilotCompanionInstaller(
+    companionSourceDirectory,
+    copilotHome
+  )
+  updateService = new UpdateService()
   dictationService = new DictationService(
     join(app.getPath('userData'), 'dictation-temp')
   )
