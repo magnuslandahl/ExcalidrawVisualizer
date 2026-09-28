@@ -1,10 +1,22 @@
 import { Buffer } from 'node:buffer'
-import { spawn } from 'node:child_process'
-import { mkdtemp, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { execFile, spawn } from 'node:child_process'
+import {
+  mkdtemp,
+  mkdir,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  stat,
+  writeFile
+} from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
+import { promisify } from 'node:util'
 import WebSocket from 'ws'
+
+const execFileAsync = promisify(execFile)
 
 const appPathArgument = process.argv[2]
 
@@ -61,7 +73,10 @@ const sceneWithBackground = (viewBackgroundColor) => ({
 
 const tempRoot = await mkdtemp(join(tmpdir(), 'excalidraw-visualizer-smoke-'))
 const scenePath = join(tempRoot, 'packaged-smoke.excalidraw')
+const secondScenePath = join(tempRoot, 'second-smoke.excalidraw')
 const profilePath = join(tempRoot, 'profile')
+const dictationAiffPath = join(profilePath, 'dictation.aiff')
+const dictationWavPath = join(profilePath, 'dictation.wav')
 const debuggingPort = await getAvailablePort()
 const processOutput = []
 
@@ -70,18 +85,49 @@ await writeFile(
   `${JSON.stringify(sceneWithBackground('#ffffff'), null, 2)}\n`,
   'utf8'
 )
+await writeFile(
+  secondScenePath,
+  `${JSON.stringify(sceneWithBackground('#fff4e6'), null, 2)}\n`,
+  'utf8'
+)
+const canonicalScenePath = await realpath(scenePath)
+const canonicalSecondScenePath = await realpath(secondScenePath)
+await mkdir(profilePath, { recursive: true })
+await execFileAsync('say', [
+  '-v',
+  'Alex',
+  '-o',
+  dictationAiffPath,
+  'Please update the API diagram and review the database connection.'
+])
+await execFileAsync('afconvert', [
+  '-f',
+  'WAVE',
+  '-d',
+  'LEI16@16000',
+  '-c',
+  '1',
+  dictationAiffPath,
+  dictationWavPath
+])
 
 const child = spawn(
   executablePath,
   [
     `--remote-debugging-port=${debuggingPort}`,
     `--user-data-dir=${profilePath}`,
+    '--use-fake-ui-for-media-stream',
+    '--use-fake-device-for-media-stream',
+    // Chromium otherwise blocks its test-only external audio fixture; the renderer stays sandboxed.
+    '--disable-features=AudioServiceSandbox',
+    `--use-file-for-fake-audio-capture=${dictationWavPath}`,
     scenePath
   ],
   {
     env: {
       ...process.env,
-      ELECTRON_ENABLE_LOGGING: 'true'
+      ELECTRON_ENABLE_LOGGING: 'true',
+      EXCALIDRAW_VISUALIZER_SMOKE_TEST: '1'
     },
     stdio: ['ignore', 'pipe', 'pipe']
   }
@@ -211,13 +257,20 @@ const readRendererState = (connection) =>
     return {
       readyState: document.readyState,
       preloadBridge: typeof window.desktop?.openPath === 'function',
-      documentName: document.querySelector('.document-identity strong')?.textContent ?? '',
-      documentPath: document.querySelector('.document-identity span')?.getAttribute('title') ?? '',
-      status: document.querySelector('.status')?.textContent?.trim() ?? '',
+      documentName: document.querySelector('.document-pane--active .document-identity strong')?.textContent ?? '',
+      documentPath: document.querySelector('.document-pane--active .document-identity span')?.getAttribute('title') ?? '',
+      status: document.querySelector('.document-pane--active .status')?.textContent?.trim() ?? '',
       workspace: rect(document.querySelector('.workspace')),
-      canvasShell: rect(document.querySelector('.canvas-shell')),
-      canvases: [...document.querySelectorAll('.canvas-shell canvas')].map(rect),
-      canvasBackground: document.querySelector('input[type="color"]')?.value ?? '',
+      canvasShell: rect(document.querySelector('.document-pane--active .canvas-shell')),
+      canvases: [...document.querySelectorAll('.document-pane--active .canvas-shell canvas')].map(rect),
+      canvasBackground: document.querySelector('.document-pane--active input[type="color"]')?.value ?? '',
+      tabNames: [...document.querySelectorAll('.document-tab__select span:first-child')].map((element) => element.textContent ?? ''),
+      feedbackPanel: Boolean(document.querySelector('.document-pane--active .feedback-panel')),
+      feedbackCards: document.querySelectorAll('.document-pane--active .feedback-card').length,
+      feedbackHistory: document.querySelectorAll('.document-pane--active .feedback-history > div').length,
+      feedbackMessage: document.querySelector('.document-pane--active .feedback-message')?.textContent ?? '',
+      feedbackText: document.querySelector('.document-pane--active .feedback-panel textarea')?.value ?? '',
+      dictationProgress: document.querySelector('.document-pane--active .feedback-progress')?.textContent ?? '',
       resources: performance.getEntriesByType('resource').map((entry) => entry.name)
     }
   })()`)
@@ -253,7 +306,7 @@ try {
       state.readyState === 'complete' &&
       state.preloadBridge &&
       state.documentName === basename(scenePath) &&
-      state.documentPath === scenePath &&
+      state.documentPath === canonicalScenePath &&
       state.workspace?.width > 0 &&
       state.workspace?.height > 0 &&
       state.canvasShell?.width > 0 &&
@@ -279,7 +332,7 @@ try {
   )
 
   await connection.evaluate(`(() => {
-    const input = document.querySelector('input[type="color"]')
+    const input = document.querySelector('.document-pane--active input[type="color"]')
     if (!(input instanceof HTMLInputElement)) {
       throw new Error('Canvas background input is unavailable')
     }
@@ -299,6 +352,112 @@ try {
     },
     (background) => background === '#dbeafe',
     'the packaged application save'
+  )
+
+  await connection.evaluate(`window.desktop.openPath(${JSON.stringify(secondScenePath)})`)
+  await waitFor(
+    () => readRendererState(connection),
+    (state) =>
+      state.tabNames.length === 2 &&
+      state.documentName === basename(secondScenePath) &&
+      state.documentPath === canonicalSecondScenePath,
+    'the second document tab'
+  )
+  await connection.evaluate(`window.desktop.openPath(${JSON.stringify(scenePath)})`)
+  await waitFor(
+    () => readRendererState(connection),
+    (state) =>
+      state.tabNames.length === 2 &&
+      state.documentName === basename(scenePath) &&
+      state.documentPath === canonicalScenePath,
+    'duplicate-path activation without a duplicate tab'
+  )
+
+  await connection.evaluate(`(() => {
+    const findButton = (label) =>
+      [...document.querySelectorAll('.document-pane--active button')]
+        .find((button) => button.textContent?.trim().startsWith(label))
+    findButton('Comments')?.click()
+  })()`)
+  await waitFor(
+    () => readRendererState(connection),
+    (state) => state.feedbackPanel,
+    'the feedback panel'
+  )
+  await connection.evaluate(`(() => {
+    const panel = document.querySelector('.document-pane--active .feedback-panel')
+    const findButton = (label) =>
+      [...panel.querySelectorAll('button')]
+        .find((button) => button.textContent?.trim() === label)
+    findButton('Drawing')?.click()
+    const textarea = panel.querySelector('textarea')
+    const setter = Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      'value'
+    ).set
+    setter.call(textarea, 'Move the service boundary label closer to the API.')
+    textarea.dispatchEvent(new Event('input', { bubbles: true }))
+    const language = panel.querySelector('select[aria-label="Dictation language"]')
+    const selectSetter = Object.getOwnPropertyDescriptor(
+      HTMLSelectElement.prototype,
+      'value'
+    ).set
+    selectSetter.call(language, 'en')
+    language.dispatchEvent(new Event('change', { bubbles: true }))
+  })()`)
+  await delay(100)
+  await connection.evaluate(`(() => {
+    const panel = document.querySelector('.document-pane--active .feedback-panel')
+    const button = [...panel.querySelectorAll('button')]
+      .find((candidate) => candidate.textContent?.trim() === 'Dictate')
+    button?.click()
+  })()`)
+  await waitFor(
+    () => readRendererState(connection),
+    (state) => state.dictationProgress.includes('Recording locally'),
+    'local microphone recording'
+  )
+  await delay(4_000)
+  await connection.evaluate(`(() => {
+    const panel = document.querySelector('.document-pane--active .feedback-panel')
+    const button = [...panel.querySelectorAll('button')]
+      .find((candidate) => candidate.textContent?.trim() === 'Stop and transcribe')
+    button?.click()
+  })()`)
+  await waitFor(
+    () => readRendererState(connection),
+    (state) =>
+      state.feedbackText.startsWith(
+        'Move the service boundary label closer to the API.'
+      ) &&
+      state.feedbackText.length > 65 &&
+      state.feedbackMessage === '' &&
+      state.dictationProgress === '',
+    'packaged offline dictation'
+  )
+  await connection.evaluate(`(() => {
+    const panel = document.querySelector('.document-pane--active .feedback-panel')
+    const button = [...panel.querySelectorAll('button')]
+      .find((candidate) => candidate.textContent?.trim() === 'Save draft')
+    button?.click()
+  })()`)
+  await waitFor(
+    () => readRendererState(connection),
+    (state) => state.feedbackCards === 1,
+    'persisted local feedback'
+  )
+  await connection.evaluate(`(() => {
+    const panel = document.querySelector('.document-pane--active .feedback-panel')
+    const button = [...panel.querySelectorAll('button')]
+      .find((candidate) => candidate.textContent?.trim() === 'Copy for agent')
+    button?.click()
+  })()`)
+  await waitFor(
+    () => readRendererState(connection),
+    (state) =>
+      state.feedbackHistory === 1 &&
+      state.feedbackMessage.includes('Copied 1 feedback item'),
+    'the copy-submission recovery history'
   )
 
   const finalState = await readRendererState(connection)
@@ -337,6 +496,10 @@ try {
         canvasLayers: initialState.canvases.length,
         externalAtomicUpdate: true,
         applicationSave: true,
+        multipleDocumentTabs: true,
+        localFeedbackPersistence: true,
+        feedbackCopyRecovery: true,
+        offlineDictation: true,
         remoteRequests: remoteResources.length,
         rendererErrors: protocolErrors.length
       },

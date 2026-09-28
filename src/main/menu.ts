@@ -6,6 +6,7 @@ import { ipcChannels, type AppCommand } from '../shared/contracts'
 
 type MenuOptions = {
   getWindow: () => BrowserWindow | undefined
+  getActiveDocumentId: () => string | null
   recentFiles: RecentFiles
 }
 
@@ -31,6 +32,11 @@ export const installApplicationMenu = (options: MenuOptions): void => {
 
   const fileSubmenu: MenuItemConstructorOptions[] = [
     {
+      label: 'New',
+      accelerator: 'CmdOrCtrl+N',
+      click: () => sendCommand(options.getWindow, { type: 'new' })
+    },
+    {
       label: 'Open…',
       accelerator: 'CmdOrCtrl+O',
       click: () => sendCommand(options.getWindow, { type: 'open' })
@@ -40,17 +46,29 @@ export const installApplicationMenu = (options: MenuOptions): void => {
     {
       label: 'Save',
       accelerator: 'CmdOrCtrl+S',
-      click: () => sendCommand(options.getWindow, { type: 'save' })
+      click: () =>
+        sendCommand(options.getWindow, {
+          type: 'save',
+          documentId: options.getActiveDocumentId()
+        })
     },
     {
       label: 'Save As…',
       accelerator: 'CmdOrCtrl+Shift+S',
-      click: () => sendCommand(options.getWindow, { type: 'save-as' })
+      click: () =>
+        sendCommand(options.getWindow, {
+          type: 'save-as',
+          documentId: options.getActiveDocumentId()
+        })
     },
     {
       label: 'Reload from Disk',
       accelerator: 'CmdOrCtrl+Shift+R',
-      click: () => sendCommand(options.getWindow, { type: 'reload' })
+      click: () =>
+        sendCommand(options.getWindow, {
+          type: 'reload',
+          documentId: options.getActiveDocumentId()
+        })
     }
   ]
 
@@ -84,7 +102,11 @@ export const installApplicationMenu = (options: MenuOptions): void => {
         {
           label: 'Fit to Content',
           accelerator: 'CmdOrCtrl+Shift+1',
-          click: () => sendCommand(options.getWindow, { type: 'fit-to-content' })
+          click: () =>
+            sendCommand(options.getWindow, {
+              type: 'fit-to-content',
+              documentId: options.getActiveDocumentId()
+            })
         },
         { type: 'separator' },
         { role: 'resetZoom' },

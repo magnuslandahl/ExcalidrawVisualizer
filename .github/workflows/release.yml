@@ -46,11 +46,31 @@ jobs:
       - name: Build versioned installers
         if: startsWith(github.ref, 'refs/tags/')
         run: |
+          npm run prepare-whisper
           npm run build
           # shellcheck disable=SC2016
           npx electron-builder --win nsis portable --publish never \
             '-c.nsis.artifactName=ExcalidrawVisualizer-${version}-Windows-${arch}-Setup.${ext}' \
             '-c.portable.artifactName=ExcalidrawVisualizer-${version}-Windows-${arch}-Portable.${ext}'
+
+      - name: Verify packaged speech resources
+        shell: pwsh
+        run: |
+          $resources = "release\win-unpacked\resources\vendor\whisper"
+          if ((Get-FileHash -Algorithm SHA256 "$resources\models\ggml-small.bin").Hash.ToLowerInvariant() -ne
+              "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b") {
+            throw "Packaged Whisper model hash is invalid"
+          }
+          if ((Get-FileHash -Algorithm SHA256 "$resources\models\ggml-silero-v5.1.2.bin").Hash.ToLowerInvariant() -ne
+              "29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf") {
+            throw "Packaged VAD model hash is invalid"
+          }
+          $whisper = Get-ChildItem "$resources\bin\windows-x64" -Recurse -File |
+            Where-Object { $_.Name -in @("whisper-cli.exe", "main.exe", "whisper.exe") } |
+            Select-Object -First 1
+          if (-not $whisper) {
+            throw "Missing packaged whisper.cpp executable"
+          }
 
       - name: List release files
         run: ls -lh release/*.exe
@@ -88,6 +108,7 @@ jobs:
       - name: Build versioned disk images
         if: startsWith(github.ref, 'refs/tags/')
         run: |
+          npm run prepare-whisper
           npm run build
           # shellcheck disable=SC2016
           npx electron-builder --mac dmg --arm64 --x64 --publish never \
@@ -98,6 +119,14 @@ jobs:
           set -euo pipefail
           for app in release/mac-arm64/*.app release/mac/*.app; do
             codesign --verify --deep --strict "$app"
+            resources="$app/Contents/Resources/vendor/whisper"
+            test "$(shasum -a 256 "$resources/models/ggml-small.bin" | cut -d' ' -f1)" = \
+              "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b"
+            test "$(shasum -a 256 "$resources/models/ggml-silero-v5.1.2.bin" | cut -d' ' -f1)" = \
+              "29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf"
+            helper_arches="$(lipo -archs "$resources/bin/macos-universal/whisper-cli")"
+            grep -qw arm64 <<<"$helper_arches"
+            grep -qw x86_64 <<<"$helper_arches"
           done
 
       - name: List release files

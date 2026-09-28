@@ -106,13 +106,18 @@ result handled, executed, or complete.
   queue item, drained automatically after the active turn ended, and produced a
   correlated `user.message` with delivery `queued`, a new turn, and an assistant
   result. No second Run action was needed.
+- A second simultaneous Copilot task in the same checkout loaded its own extension
+  process, session ID, mode-`0600` descriptor, loopback port, and bearer token.
+  The task-local token hashes and endpoints differed. Each authenticated status
+  call reported only its owning task, each unauthenticated call returned `401`,
+  and the second task's immediate self-probe returned only to that conversation.
 - Extension reload reconnected the provider, preserved action routing for the
   open canvas instance, and replaced the descriptor with a new generation.
   Broader restart and stale-generation behavior still require focused tests.
 
 These checks demonstrate routing and authentication structure. They do not yet
-prove delivery while already idle, blocked-state queue holding, crash recovery,
-or isolation between two simultaneous Copilot tasks.
+prove delivery while already idle, blocked-state queue holding, or full
+application/crash recovery.
 
 ## Remaining Stage 0 gates
 
@@ -120,15 +125,13 @@ or isolation between two simultaneous Copilot tasks.
    final `assistant.turn_end` and `session.idle` correlation for admitted messages.
 2. Trigger a real permission wait and clarification wait. Confirm local queued
    work does not advance and that the blocking response remains usable.
-3. Open two Copilot tasks in the same repository, run one companion per task, and
-   prove that tokens, descriptors, session IDs, queues, and messages cannot cross.
-4. Reload the extension, restart the app, sleep/wake the machine, close canvases,
+3. Reload the extension, restart the app, sleep/wake the machine, close canvases,
    and switch foreground tasks. Record descriptor cleanup, provider rehydration,
    and stale-generation rejection.
-5. Establish a supported launch/pairing route from a task to the external
+4. Establish a supported launch/pairing route from a task to the external
    Visualizer and a supported reverse pairing route without matching by filename,
    title, repository, or recency.
-6. After those results, define the versioned adapter capability contract and
+5. After those results, define the versioned adapter capability contract and
    choose the production local transport and transactional store.
 
 Application code must not consume this bridge until these gates establish the

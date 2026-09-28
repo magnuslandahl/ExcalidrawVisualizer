@@ -15,4 +15,5 @@ Thumbs.db
 *.pfx
 *.cer
 artifacts/
+vendor/whisper/
 src/renderer/public/excalidraw-assets/

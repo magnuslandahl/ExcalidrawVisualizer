@@ -49,6 +49,8 @@ The packages are currently unsigned for distribution.
 ## Features
 
 - Native open, save, save-as, reload, recent-files, drag-and-drop, and keyboard shortcuts
+- Multiple mounted document tabs with independent viewport, undo, autosave, watcher,
+  conflict, and dirty state
 - Launch-path handling, single-instance forwarding, and packaged `.excalidraw` association
 - Chokidar-based watching for direct writes, atomic replacement, deletion, and recreation
 - SHA-256 application-write echo suppression
@@ -60,21 +62,38 @@ The packages are currently unsigned for distribution.
 - System, light, and dark application themes with a remembered preference
 - Arbitrary canvas background colors saved as normal Excalidraw document state
 - Standard Excalidraw stroke and fill palettes whenever an element is selected
+- Local feedback drafts anchored to selected elements, points, rectangular regions, or
+  the whole drawing; overlays never enter the `.excalidraw` file
+- Persistent feedback history with clipboard submission and copy-again recovery
+- Bundled offline English, Swedish, and automatic-language dictation using a pinned
+  `whisper.cpp` helper, multilingual model, and Silero VAD
 - Fully local JavaScript, CSS, worker chunks, and Excalidraw fonts
 
-## Planned agent feedback workflow
+## Local feedback and planned agent integration
 
-The [agent feedback proposal](docs/AGENT-FEEDBACK-PROPOSAL.md) describes a future
-workflow with multiple drawings, comments anchored to diagram elements, bundled
-Swedish/English dictation, and feedback to the same GitHub Copilot desktop task.
-Queued feedback would start automatically when the agent is ready and idle;
-drafts would remain unsent. These features are not implemented. The first planned
-step is to verify the desktop app's session integration and lifecycle capabilities.
+Open **Comments** on a drawing to create feedback for selected elements, a point, a
+region, or the whole drawing. Drafts and copy history are stored in the application's
+private local data, not in the drawing. **Copy for agent** puts a revision-labelled
+text submission on the clipboard; **Copy again** recovers the same immutable snapshot.
+This local workflow works without pairing an agent.
+
+The feedback composer also supports local dictation. Choose **English**, **Svenska**,
+or **Auto language**, explicitly start recording, then stop and review the editable
+transcript. Audio is converted to bounded PCM, processed locally with VAD, and removed
+after completion, cancellation, or failure. Existing typed text is preserved when
+microphone permission or transcription fails.
+
+The [agent feedback proposal](docs/AGENT-FEEDBACK-PROPOSAL.md) describes the remaining
+same-session GitHub Copilot desktop integration. Automatic immediate/queued delivery,
+pairing, replies, and result review are not shipped yet. The current joined-extension
+API also has no proven global task activation/creation route, so seamless startup in
+both directions remains a documented Stage 0 blocker rather than an advertised feature.
 
 ## Requirements
 
 - Node.js 20.19 or newer (Node.js 22.12+ is also supported by the build toolchain)
 - npm
+- Git and CMake when packaging the macOS dictation helper
 - Windows 10/11 for Windows installer creation
 - macOS 13 Ventura or newer for macOS disk-image creation
 
@@ -131,6 +150,12 @@ npm run package:win
 npm run package:mac
 ```
 
+Packaging runs `npm run prepare-whisper`, downloads approximately 489 MB of pinned model
+assets, verifies exact byte sizes and SHA-256 hashes, and either extracts the pinned
+Windows x64 helper or compiles a universal macOS helper. Generated inputs stay under the
+ignored `vendor/whisper/` directory. Packaged applications include the component license
+notices from `build/WHISPER-NOTICES.txt`.
+
 Create only an unpacked application directory:
 
 ```powershell
@@ -163,7 +188,9 @@ Use any of these paths:
 - Open an associated `.excalidraw` file after installing the packaged application
 
 A second application launch forwards its file to the existing window and focuses it.
-Opening another file while the active drawing is dirty requires confirmation.
+Opening another file creates or activates its tab without disturbing dirty state in the
+other mounted editors. For a file-backed document, **Save As** to another canonical path
+creates a separate tab and document identity; feedback remains with the original.
 
 ## Colors and appearance
 
@@ -240,8 +267,9 @@ After installation, the application does not require a development server, CDN, 
 Excalidraw service, or network API. Excalidraw JavaScript, styles, lazy chunks, workers,
 and fonts are bundled in the application. The production build removes Excalidraw's
 upstream CDN font fallback so missing local assets fail closed instead of attempting a
-network request. The renderer denies remote window creation and navigation, Electron
-permission requests are denied, and the Content Security Policy
+network request. The renderer denies remote window creation and navigation. Electron permissions are
+denied except for an audio-only microphone request from the trusted renderer after the
+user starts dictation. The Content Security Policy
 allows only application resources, data/blob media, and the localhost WebSocket used by
 the development server.
 
@@ -254,10 +282,10 @@ GitHub Actions follows the same public-release pattern as FeedbackRecorder:
 
 - Pull requests and `main` run tests, type-checking, linting, Windows and macOS
   packaging smoke tests, and Gitleaks scans of files and Git history.
-- The macOS smoke test launches the packaged native app, opens a real
-  `.excalidraw` path, checks both canvas layers, exercises an external atomic
-  update and an application save, and rejects renderer errors or remote
-  requests.
+- The macOS smoke test launches the packaged native app, opens real document tabs,
+  checks both canvas layers, exercises an external atomic update, application save,
+  persisted feedback, copy recovery, and bundled offline dictation, and rejects
+  renderer errors or remote requests.
 - Every push to `main` refreshes the rolling `latest` release and uploads
   fixed-name Windows and macOS downloads.
 - A semantic version tag such as `v0.2.0` publishes a permanent release whose filenames
@@ -283,12 +311,12 @@ notarization are the next macOS distribution priorities.
 
 ```text
 src/
-  main/       Electron lifecycle, menus, dialogs, filesystem, atomic saves, watcher
+  main/       Electron lifecycle, document registry, persistence, dictation, filesystem
   preload/    Narrow typed contextBridge API
   renderer/   React shell and official Excalidraw component
   shared/     IPC contracts, scene validation, renderer-independent three-way merge
-tests/        Vitest unit and temporary-directory watcher integration tests
-scripts/      Reproducible local Excalidraw asset preparation
+tests/        Vitest unit and temporary-directory integration tests
+scripts/      Reproducible Excalidraw and Whisper asset preparation
 build/        Application and file-association icons
 .github/      Pull-request CI and rolling/versioned release workflows
 ```
@@ -301,7 +329,8 @@ Security boundaries:
 - no general filesystem, shell, or raw IPC API exposed to the renderer
 - filesystem paths and extensions validated in the main process
 - save payloads reparsed and validated before writing
-- remote navigation, popups, and permission requests denied
+- remote navigation and popups denied; permissions denied except explicit audio-only
+  microphone capture for local dictation
 
 ## Known limitations
 
@@ -315,6 +344,8 @@ Security boundaries:
   managed-device policy may block them.
 - macOS packages are ad-hoc signed but not Developer ID signed or notarized, so
   Gatekeeper blocks the first launch until the user explicitly approves it.
+- Local feedback can be copied for an agent, but automatic delivery, task pairing,
+  replies, and provider receipts remain planned work.
 - Linux packaging is not configured.
 
 ## License

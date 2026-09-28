@@ -125,7 +125,9 @@ Keep these invariants:
 - no raw `ipcRenderer`, shell, process, or filesystem object in the renderer
 - all filesystem access in the main process
 - path, extension, and payload validation in the main process
-- navigation, popups, and permission requests denied by default
+- navigation, popups, and permission requests denied by default; the only
+  permission exception is audio-only microphone capture from the trusted
+  renderer after an explicit dictation action
 - a restrictive Content Security Policy
 
 Do not weaken sandboxing to work around build problems. The preload must remain
@@ -135,9 +137,11 @@ execute the emitted ESM preload bundle.
 ## Current user experience
 
 - The welcome view opens files through a button or drag and drop.
-- The header shows the active file, full path, save/watch status, application
-  theme selector, canvas background color picker, Open, Fit to Content, and
-  Reload.
+- Multiple mounted tabs retain independent document, viewport, undo, autosave,
+  watcher, conflict, and dirty state.
+- The application header contains theme, New, and Open controls. Each document
+  toolbar shows its file, save/watch status, comments, canvas color, Fit to
+  Content, and Reload controls.
 - Application appearance can be System, Light, or Dark and is remembered
   locally.
 - Canvas background color is document state and is saved in the
@@ -150,11 +154,22 @@ execute the emitted ESM preload bundle.
 - Errors and watcher states are visible; malformed external content never
   replaces the last valid scene.
 - Conflicts offer Keep local, Load external, and Save local as a separate file.
+- The collapsible feedback panel stores local drafts anchored to selected
+  elements, points, regions, or the whole drawing. Feedback overlays are not
+  Excalidraw elements and never enter saved or exported drawings.
+- Copy for agent creates an immutable local submission snapshot and copies it to
+  the clipboard. Copy again recovers a prior snapshot. Provider delivery,
+  pairing, replies, and receipts remain Stage 2 work.
+- Feedback dictation is explicitly activated, editable before copying, and
+  processed offline through bundled English/Swedish multilingual Whisper assets.
+  Typed text survives permission denial, cancellation, silence, or engine
+  failure.
 
-The application layout uses explicit CSS grid rows for the header, optional
-banner, and workspace. Do not return to implicit placement: when the banner is
-absent, implicit placement puts the workspace in the zero-height `auto` row and
-the Excalidraw canvas renders blank.
+The application layout uses explicit CSS grid rows for the header, tabs,
+optional global banner, and workspace. Each document pane explicitly places its
+toolbar, optional banner, and canvas. Do not return to implicit placement: when
+a banner is absent, implicit placement can put the workspace in a zero-height
+`auto` row and render the Excalidraw canvas blank.
 
 ## Architecture
 
@@ -165,11 +180,12 @@ the Excalidraw canvas renders blank.
 DIAGRAM-DESIGN-GUIDELINES.md
                           Visual language for overview and detailed architecture drawings
 TODO.md                   Current handoff queue and platform roadmap
-build/                    Application/file icons, DMG guidance, ad-hoc signing hook
+build/                    Icons, DMG guidance, signing hook, Whisper notices
 scripts/
   check-release-version  Enforces tag/package version agreement
   copy-excalidraw-assets Copies pinned local Excalidraw fonts
-  smoke-packaged-macos   Exercises the packaged renderer, file watch, and save
+  fetch-whisper-assets   Verifies/builds ignored local speech assets
+  smoke-packaged-macos   Exercises packaged editing, feedback, and dictation
 src/
   main/                   Trusted Electron and filesystem boundary
   preload/                Narrow contextBridge API
@@ -191,13 +207,25 @@ electron.vite.config.ts   Main, sandbox preload, renderer, offline font transfor
 - waits for an explicit renderer-ready handshake before delivering a launch path
 - guards navigation, new windows, permissions, and dirty-window quitting
 
-`src/main/document-controller.ts` owns the active document:
+`src/main/document-registry.ts` owns document identities, canonical paths,
+visible tabs, retained controllers, and in-process Save As reservations. Opening
+an already owned canonical path focuses that document instead of duplicating it.
+For a file-backed drawing, Save As to another path creates a new controller and
+tab without moving the original feedback or dirty state. A first save gives an
+untitled document its path without changing identity.
+
+Each `src/main/document-controller.ts` instance owns one document:
 
 - validates `.excalidraw` paths
-- opens, reloads, saves, and saves as
-- updates recent files
-- switches the watcher when the active path changes
+- opens, reloads, and saves one scene
+- owns one directory watcher and fingerprint tracker
 - emits typed document events to the renderer
+
+`src/main/feedback-store.ts` validates and atomically persists feedback drafts
+and immutable copy-submission snapshots under application-private user data.
+`src/main/dictation-service.ts` serializes native Whisper jobs, validates bounded
+PCM WAV input, uses unique temporary paths, supports cancellation, limits
+process/output size, and removes completed or orphaned owned job directories.
 
 `src/main/atomic-write.ts` writes a temporary file in the destination directory,
 flushes it, replaces the destination, and preserves its mode when supported.
@@ -223,10 +251,10 @@ design avoids.
 
 `src/preload/index.ts` exposes only `window.desktop`, a typed API for:
 
-- open/open-path/reload
-- save/save-as
-- recent files
-- dirty-state reporting
+- document-scoped new/open/reload/close/save/save-as
+- active-document and dirty-state reporting
+- bounded feedback persistence/copy methods
+- bounded dictation submission and cancellation
 - renderer-ready launch-path handoff
 - document and menu command subscriptions
 - safe dropped-file path retrieval
@@ -236,7 +264,7 @@ main handler, validation, and tests together.
 
 ### Renderer
 
-`src/renderer/src/App.tsx` owns document UI state:
+`src/renderer/src/App.tsx` owns the tab manager and mounted per-document editors:
 
 - base, current, and conflict scene references
 - Excalidraw imperative API integration
@@ -245,6 +273,10 @@ main handler, validation, and tests together.
 - viewport-preserving external updates
 - theme and canvas color controls
 - drag and drop, commands, banners, and conflict actions
+- scene-coordinate feedback capture and overlays outside scene state
+- persisted feedback composition, history, and clipboard recovery
+- explicit AudioWorklet microphone capture, PCM conversion, and editable
+  transcription
 
 Use Excalidraw's `restore()` before applying imported data and
 `serializeAsJSON(..., "local")` when producing saved scene JSON.
@@ -290,12 +322,23 @@ build. The transform intentionally fails the build if the expected upstream
 shape changes or a remote fallback remains. Keep this fail-closed behavior when
 upgrading Excalidraw, and verify the resulting app with a network log.
 
+`scripts/fetch-whisper-assets.mjs` owns the speech supply chain. It downloads the
+pinned multilingual small model and Silero VAD with exact size/SHA-256 checks.
+On Windows x64 it verifies and extracts the pinned upstream archive. On macOS it
+checks out the pinned `whisper.cpp` commit and builds one static universal
+`arm64`/`x86_64` CLI with a macOS 13 deployment target. Generated assets live
+only under ignored `vendor/whisper/` and are copied outside ASAR. Never replace
+these checks with floating URLs, first-run downloads, remote dictation, or
+unverified binaries. Keep `build/WHISPER-NOTICES.txt` synchronized with upstream
+licenses.
+
 ## Development workflow
 
 Requirements:
 
 - Node.js 20.19 or newer
 - npm
+- Git and CMake for macOS dictation-helper packaging
 - Windows 10/11 for Windows package creation
 - macOS 13 Ventura or newer for macOS package creation
 
@@ -363,6 +406,11 @@ The focused Vitest suite currently covers:
 - deletion-versus-modification conflicts
 - embedded file-map merging
 - dirty-document merge behavior
+- canonical multi-document open, retained reopen, Save As identity, cancel, and
+  symlink behavior
+- feedback schema validation, atomic persistence, immutable submissions, and
+  concurrent mutation serialization
+- bounded PCM downsampling/WAV encoding and dictation request validation
 
 Use temporary directories and observable events for watcher tests. Do not add
 fixed sleeps as the assertion mechanism.
@@ -375,6 +423,9 @@ The macOS package smoke test (`npm run smoke:mac -- <app-path>`) verifies:
 - the workspace and both canvas layers have non-zero dimensions
 - atomic external replacement reaches the renderer
 - a renderer edit is saved through the main process
+- multiple tabs open and duplicate paths activate without duplication
+- local feedback persists, copies, and remains recoverable
+- microphone capture and bundled offline dictation produce an editable transcript
 - no renderer resource errors appear
 - no remote network request is attempted
 
@@ -493,24 +544,30 @@ Implemented:
   smoke coverage
 - public CI, secret scanning, rolling releases, tagged releases, checksums
 - public repository, protected `main`, rolling `latest`, and permanent `v0.1.0`
+- per-document tabs and controllers with canonical path ownership and Save As
+  copy semantics
+- local anchored feedback drafts, atomic private persistence, clipboard
+  submissions, and copy recovery
+- bundled local English/Swedish dictation with pinned model/VAD inputs,
+  microphone-only permission, serialized native jobs, cancellation, and cleanup
 
 Near-term plan:
 
-1. Follow [the agent feedback planning baseline](docs/AGENT-FEEDBACK-PROPOSAL.md),
-   starting with a same-session GitHub Copilot desktop feasibility check. The
-   proposed workflow includes multiple drawings, anchored feedback, bundled local
-   Swedish/English dictation, and automatic queue processing when ready and idle.
-   This is documentation only so far. Do not implement against an assumed desktop
-   API or treat MCP notifications as proof that a conversation will start a turn.
-   The proposal identifies future scoped policy changes for microphone capture
-   and user-submitted context; current security/offline rules still apply until
-   implementation explicitly updates and validates those boundaries.
-2. Add Apple Developer ID signing, hardened runtime, and notarization when the
+1. Complete the remaining
+   [Stage 0 feasibility gates](docs/AGENT-FEEDBACK-STAGE0.md) for idle delivery,
+   blocked states, lifecycle recovery, and seamless startup. The installed
+   joined-session API still exposes no supported global task listing,
+   activation, or creation route.
+2. Implement Stage 2 pairing and immediate/queued delivery only against the
+   verified capability contract. Do not treat MCP notifications as proof that a
+   conversation will start a turn, and do not silently create another SDK
+   conversation.
+3. Add Apple Developer ID signing, hardened runtime, and notarization when the
    required certificate and credentials are available.
-3. Add Windows code signing when a certificate is available.
-4. Replace placeholder application/file icons with final original artwork.
-5. Add privacy-safe screenshots after final branding is available.
-6. Gather public feedback before expanding the merge model further.
+4. Add Windows code signing when a certificate is available.
+5. Replace placeholder application/file icons with final original artwork.
+6. Add privacy-safe screenshots after final branding is available.
+7. Gather public feedback before expanding the merge model further.
 
 Possible later work, not current commitments:
 

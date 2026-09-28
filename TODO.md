@@ -13,7 +13,8 @@ rolling and tagged releases.
 ## Agent feedback workflow
 
 Planning reference: [Visual feedback and agent integration](docs/AGENT-FEEDBACK-PROPOSAL.md).
-These are future features, not current application capabilities.
+Stage 1 local feedback is implemented. Provider pairing and delivery remain
+future capabilities.
 
 - [x] Record the proposed workflow and the product requirement that queued feedback
   start automatically when the agent is ready and idle; drafts remain unsent.
@@ -30,10 +31,25 @@ These are future features, not current application capabilities.
     active turn and correlates admission, queued delivery, turn, and result IDs.
   - [ ] Correlate queued and immediate sends while already idle, final session-idle
     completion, and permission and clarification blocks.
-  - [ ] Prove isolation with two simultaneous tasks and complete reload, restart,
-    sleep/wake, stale-generation, and startup-in-both-directions checks.
-- [ ] Stage 1: add document-scoped tabs, anchored comments, persisted drafts and
-  outbox, plus bundled local Swedish/English dictation on supported platforms.
+  - [x] Prove two simultaneous tasks use distinct session IDs, descriptors, ports,
+    tokens, queues, and self-routed messages in the same checkout.
+  - [ ] Complete reload, restart, sleep/wake, stale-generation, and
+    startup-in-both-directions checks.
+- [x] Stage 1: add document-scoped tabs, anchored comments, persisted drafts and
+  copy history, plus bundled local Swedish/English dictation on supported
+  platforms.
+  - [x] Add canonical path ownership, retained per-document controllers, mounted
+    tabs, independent watchers/autosave/conflicts, and Save As copy semantics.
+  - [x] Add element, point, region, and whole-drawing feedback overlays outside
+    scene state, with atomically persisted drafts and immutable copy snapshots.
+  - [x] Add copy-again recovery without claiming provider admission or delivery.
+  - [x] Pin and verify the multilingual small model, Silero VAD, Windows helper,
+    and universal macOS helper; keep generated assets ignored and outside ASAR.
+  - [x] Add audio-only permission handling, bounded PCM capture, serialized local
+    jobs, cancellation, unique temporary paths, output limits, and orphan cleanup.
+  - [x] Verify synthetic English and Swedish transcription. On the local
+    Apple-silicon package, observed cold/warm CLI latency was 7.22s/0.34s for
+    short samples; packaged runtime smoke also covers capture and transcription.
 - [ ] Stage 2: complete pairing, immediate/queued delivery, replies, result review,
   and recovery with honest receipts and no automatic replay of ambiguous sends.
 - [ ] Evaluate walkthrough recording and additional agent adapters only after the

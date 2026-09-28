@@ -638,6 +638,11 @@ Swedish/English dictation in this stage, including packaged execution, microphon
 permissions and cold/warm latency measurements. Speech is required before calling
 the first integrated release complete.
 
+Implementation and local verification are recorded in
+[the Stage 1 implementation record](AGENT-FEEDBACK-STAGE1.md). This completes
+the local foundation only; it does not close the remaining Stage 0 integration
+gates or implement Stage 2 provider delivery.
+
 ### Stage 2 — Complete the Copilot feedback loop
 
 Pair files, dispatch through the verified companion, implement immediate/queued
