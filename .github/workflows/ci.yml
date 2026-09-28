@@ -88,6 +88,7 @@ jobs:
           if (-not $whisper) {
             throw "Missing packaged whisper.cpp executable"
           }
+          npm run smoke:packaged -- $executable
 
   package_macos:
     name: macOS packaging and runtime smoke test

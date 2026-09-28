@@ -13,7 +13,8 @@ export const ipcChannels = {
   save: 'document:save',
   saveAs: 'document:save-as',
   reload: 'document:reload',
-  close: 'document:close',
+  closeDocument: 'document:close',
+  openInNewWindow: 'document:open-in-new-window',
   setDirty: 'document:set-dirty',
   setActive: 'document:set-active',
   dictationTranscribe: 'dictation:transcribe',
@@ -110,6 +111,7 @@ export type DesktopApi = {
   saveAs(request: SaveRequest): Promise<SaveResult>
   reload(documentId: string): Promise<boolean>
   closeDocument(documentId: string): Promise<boolean>
+  openInNewWindow(documentId: string): Promise<void>
   setDirty(documentId: string, dirty: boolean): void
   setActiveDocument(documentId: string | null): void
   transcribe(request: DictationRequest): Promise<DictationResult>
@@ -129,7 +131,7 @@ export type DesktopApi = {
     feedbackId: string,
     updatedAt: string
   ): Promise<LocalFeedback>
-  rendererReady(): Promise<string | undefined>
+  rendererReady(): Promise<string[]>
   getDroppedFilePath(file: File): string
   onDocumentEvent(listener: (event: DocumentEvent) => void): () => void
   onAppCommand(listener: (command: AppCommand) => void): () => void

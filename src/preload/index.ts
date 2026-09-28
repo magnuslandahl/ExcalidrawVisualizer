@@ -27,7 +27,9 @@ const api: DesktopApi = {
   reload: (documentId) =>
     ipcRenderer.invoke(ipcChannels.reload, documentId) as Promise<boolean>,
   closeDocument: (documentId) =>
-    ipcRenderer.invoke(ipcChannels.close, documentId) as Promise<boolean>,
+    ipcRenderer.invoke(ipcChannels.closeDocument, documentId) as Promise<boolean>,
+  openInNewWindow: (documentId) =>
+    ipcRenderer.invoke(ipcChannels.openInNewWindow, documentId) as Promise<void>,
   setDirty: (documentId, dirty) =>
     ipcRenderer.send(ipcChannels.setDirty, documentId, dirty),
   setActiveDocument: (documentId) =>
@@ -74,7 +76,7 @@ const api: DesktopApi = {
       updatedAt
     ) as Promise<LocalFeedback>,
   rendererReady: () =>
-    ipcRenderer.invoke(ipcChannels.rendererReady) as Promise<string | undefined>,
+    ipcRenderer.invoke(ipcChannels.rendererReady) as Promise<string[]>,
   getDroppedFilePath: (file) => webUtils.getPathForFile(file),
   onDocumentEvent: (listener) => {
     const handler = (_event: Electron.IpcRendererEvent, payload: DocumentEvent): void =>

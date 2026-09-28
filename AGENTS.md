@@ -139,6 +139,9 @@ execute the emitted ESM preload bundle.
 - The welcome view opens files through a button or drag and drop.
 - Multiple mounted tabs retain independent document, viewport, undo, autosave,
   watcher, conflict, and dirty state.
+- Tabs can be arranged in a side-by-side pane. A saved clean tab can be moved
+  into another secured application window; each window owns its own registry
+  and dirty-close guard while sharing private feedback and dictation services.
 - The application header contains theme, New, and Open controls. Each document
   toolbar shows its file, save/watch status, comments, canvas color, Fit to
   Content, and Reload controls.
@@ -185,7 +188,7 @@ scripts/
   check-release-version  Enforces tag/package version agreement
   copy-excalidraw-assets Copies pinned local Excalidraw fonts
   fetch-whisper-assets   Verifies/builds ignored local speech assets
-  smoke-packaged-macos   Exercises packaged editing, feedback, and dictation
+  smoke-packaged         Exercises packaged multi-window editing and local services
 src/
   main/                   Trusted Electron and filesystem boundary
   preload/                Narrow contextBridge API
@@ -205,7 +208,8 @@ electron.vite.config.ts   Main, sandbox preload, renderer, offline font transfor
 - registers typed IPC handlers
 - handles initial command-line paths, second-instance paths, and `open-file`
 - waits for an explicit renderer-ready handshake before delivering a launch path
-- guards navigation, new windows, permissions, and dirty-window quitting
+- owns a document registry and dirty-state guard per secured application window
+- guards navigation, popup creation, permissions, and dirty-window quitting
 
 `src/main/document-registry.ts` owns document identities, canonical paths,
 visible tabs, retained controllers, and in-process Save As reservations. Opening

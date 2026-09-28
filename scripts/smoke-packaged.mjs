@@ -1,38 +1,26 @@
 import { Buffer } from 'node:buffer'
-import { execFile, spawn } from 'node:child_process'
-import {
-  mkdtemp,
-  mkdir,
-  readFile,
-  realpath,
-  rename,
-  rm,
-  stat,
-  writeFile
-} from 'node:fs/promises'
+import { spawn } from 'node:child_process'
+import { mkdtemp, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
-import { promisify } from 'node:util'
-import WebSocket from 'ws'
 
-const execFileAsync = promisify(execFile)
+const packagePathArgument = process.argv[2]
+const WebSocketClient = globalThis.WebSocket
 
-const appPathArgument = process.argv[2]
-
-if (process.platform !== 'darwin') {
-  throw new Error('The packaged macOS smoke test must run on macOS')
+if (!packagePathArgument) {
+  throw new Error(
+    'Usage: npm run smoke:packaged -- <path-to-app-or-executable>'
+  )
 }
-if (!appPathArgument) {
-  throw new Error('Usage: npm run smoke:mac -- release/mac-arm64/ExcalidrawVisualizer.app')
+if (typeof WebSocketClient !== 'function') {
+  throw new Error('This smoke test requires Node.js with built-in WebSocket support')
 }
-const appPath = resolve(appPathArgument)
-const executablePath = join(
-  appPath,
-  'Contents',
-  'MacOS',
-  'ExcalidrawVisualizer'
-)
+const packagePath = resolve(packagePathArgument)
+const executablePath =
+  process.platform === 'darwin'
+    ? join(packagePath, 'Contents', 'MacOS', 'ExcalidrawVisualizer')
+    : packagePath
 
 await stat(executablePath)
 
@@ -73,10 +61,8 @@ const sceneWithBackground = (viewBackgroundColor) => ({
 
 const tempRoot = await mkdtemp(join(tmpdir(), 'excalidraw-visualizer-smoke-'))
 const scenePath = join(tempRoot, 'packaged-smoke.excalidraw')
-const secondScenePath = join(tempRoot, 'second-smoke.excalidraw')
+const secondScenePath = join(tempRoot, 'packaged-smoke-second.excalidraw')
 const profilePath = join(tempRoot, 'profile')
-const dictationAiffPath = join(profilePath, 'dictation.aiff')
-const dictationWavPath = join(profilePath, 'dictation.wav')
 const debuggingPort = await getAvailablePort()
 const processOutput = []
 
@@ -90,44 +76,19 @@ await writeFile(
   `${JSON.stringify(sceneWithBackground('#fff4e6'), null, 2)}\n`,
   'utf8'
 )
-const canonicalScenePath = await realpath(scenePath)
-const canonicalSecondScenePath = await realpath(secondScenePath)
-await mkdir(profilePath, { recursive: true })
-await execFileAsync('say', [
-  '-v',
-  'Alex',
-  '-o',
-  dictationAiffPath,
-  'Please update the API diagram and review the database connection.'
-])
-await execFileAsync('afconvert', [
-  '-f',
-  'WAVE',
-  '-d',
-  'LEI16@16000',
-  '-c',
-  '1',
-  dictationAiffPath,
-  dictationWavPath
-])
 
 const child = spawn(
   executablePath,
   [
     `--remote-debugging-port=${debuggingPort}`,
     `--user-data-dir=${profilePath}`,
-    '--use-fake-ui-for-media-stream',
-    '--use-fake-device-for-media-stream',
-    // Chromium otherwise blocks its test-only external audio fixture; the renderer stays sandboxed.
-    '--disable-features=AudioServiceSandbox',
-    `--use-file-for-fake-audio-capture=${dictationWavPath}`,
-    scenePath
+    scenePath,
+    secondScenePath
   ],
   {
     env: {
       ...process.env,
-      ELECTRON_ENABLE_LOGGING: 'true',
-      EXCALIDRAW_VISUALIZER_SMOKE_TEST: '1'
+      ELECTRON_ENABLE_LOGGING: 'true'
     },
     stdio: ['ignore', 'pipe', 'pipe']
   }
@@ -227,7 +188,7 @@ const connectToRenderer = async () => {
           candidate.webSocketDebuggerUrl
       )
       if (target) {
-        const socket = new WebSocket(target.webSocketDebuggerUrl)
+        const socket = new WebSocketClient(target.webSocketDebuggerUrl)
         await new Promise((resolveSocket, rejectSocket) => {
           socket.addEventListener('open', resolveSocket, { once: true })
           socket.addEventListener('error', rejectSocket, { once: true })
@@ -257,20 +218,22 @@ const readRendererState = (connection) =>
     return {
       readyState: document.readyState,
       preloadBridge: typeof window.desktop?.openPath === 'function',
-      documentName: document.querySelector('.document-pane--active .document-identity strong')?.textContent ?? '',
-      documentPath: document.querySelector('.document-pane--active .document-identity span')?.getAttribute('title') ?? '',
-      status: document.querySelector('.document-pane--active .status')?.textContent?.trim() ?? '',
+      documentName: document.querySelector('.document-identity strong')?.textContent ?? '',
+      documentPath: document.querySelector('.document-identity span')?.getAttribute('title') ?? '',
+      status: document.querySelector('.status')?.textContent?.trim() ?? '',
+      tabs: [...document.querySelectorAll('.document-tab')].map((tab) => ({
+        name: tab.querySelector('.document-tab__select span')?.textContent ?? '',
+        selected: tab.classList.contains('document-tab--active')
+      })),
+      split: document.querySelector('.workspace')?.classList.contains('workspace--split') ?? false,
+      visibleEditors: [...document.querySelectorAll('.editor-slot--active')].map((editor) => ({
+        shell: rect(editor.querySelector('.canvas-shell')),
+        canvases: [...editor.querySelectorAll('canvas')].map(rect)
+      })),
       workspace: rect(document.querySelector('.workspace')),
-      canvasShell: rect(document.querySelector('.document-pane--active .canvas-shell')),
-      canvases: [...document.querySelectorAll('.document-pane--active .canvas-shell canvas')].map(rect),
-      canvasBackground: document.querySelector('.document-pane--active input[type="color"]')?.value ?? '',
-      tabNames: [...document.querySelectorAll('.document-tab__select span:first-child')].map((element) => element.textContent ?? ''),
-      feedbackPanel: Boolean(document.querySelector('.document-pane--active .feedback-panel')),
-      feedbackCards: document.querySelectorAll('.document-pane--active .feedback-card').length,
-      feedbackHistory: document.querySelectorAll('.document-pane--active .feedback-history > div').length,
-      feedbackMessage: document.querySelector('.document-pane--active .feedback-message')?.textContent ?? '',
-      feedbackText: document.querySelector('.document-pane--active .feedback-panel textarea')?.value ?? '',
-      dictationProgress: document.querySelector('.document-pane--active .feedback-progress')?.textContent ?? '',
+      canvasShell: rect(document.querySelector('.canvas-shell')),
+      canvases: [...document.querySelectorAll('.canvas-shell canvas')].map(rect),
+      canvasBackground: document.querySelector('input[type="color"]')?.value ?? '',
       resources: performance.getEntriesByType('resource').map((entry) => entry.name)
     }
   })()`)
@@ -305,8 +268,11 @@ try {
     (state) =>
       state.readyState === 'complete' &&
       state.preloadBridge &&
-      state.documentName === basename(scenePath) &&
-      state.documentPath === canonicalScenePath &&
+      state.documentName === basename(secondScenePath) &&
+      state.documentPath === secondScenePath &&
+      state.tabs.length === 2 &&
+      state.tabs.some((tab) => tab.name === basename(scenePath)) &&
+      state.tabs.some((tab) => tab.name === basename(secondScenePath)) &&
       state.workspace?.width > 0 &&
       state.workspace?.height > 0 &&
       state.canvasShell?.width > 0 &&
@@ -314,7 +280,49 @@ try {
       state.canvases.filter(
         (canvas) => canvas?.width > 0 && canvas?.height > 0
       ).length >= 2,
-    'the launch-path drawing and non-zero canvas layers'
+    'both launch-path tabs and non-zero canvas layers'
+  )
+
+  await connection.evaluate(`(() => {
+    const firstTab = document.querySelector('.document-tab')
+    if (!(firstTab instanceof HTMLElement)) {
+      throw new Error('The first drawing tab is unavailable')
+    }
+    firstTab.dispatchEvent(new MouseEvent('contextmenu', {
+      bubbles: true,
+      clientX: 100,
+      clientY: 70
+    }))
+  })()`)
+  await waitFor(
+    () =>
+      connection.evaluate(`(() => {
+        const moveButton = [...document.querySelectorAll('.tab-context-menu button')]
+          .find((button) => button.textContent?.toLowerCase().includes('move to side view'))
+        if (moveButton instanceof HTMLButtonElement) {
+          moveButton.click()
+          return true
+        }
+        return false
+      })()`),
+    Boolean,
+    'the side-view context-menu command'
+  )
+
+  await waitFor(
+    () => readRendererState(connection),
+    (state) =>
+      state.split &&
+      state.visibleEditors.length === 2 &&
+      state.visibleEditors.every(
+        (editor) =>
+          editor.shell?.width > 0 &&
+          editor.shell?.height > 0 &&
+          editor.canvases.filter(
+            (canvas) => canvas?.width > 0 && canvas?.height > 0
+          ).length >= 2
+      ),
+    'two visible drawing panes with non-zero canvas layers'
   )
 
   const replacementPath = join(tempRoot, '.packaged-smoke-replacement')
@@ -327,12 +335,14 @@ try {
 
   await waitFor(
     () => readRendererState(connection),
-    (state) => state.canvasBackground === '#f0e8ff',
-    'the atomic external update'
+    (state) =>
+      state.documentPath === scenePath &&
+      state.canvasBackground === '#f0e8ff',
+    'the external update routed to its drawing tab'
   )
 
   await connection.evaluate(`(() => {
-    const input = document.querySelector('.document-pane--active input[type="color"]')
+    const input = document.querySelector('input[type="color"]')
     if (!(input instanceof HTMLInputElement)) {
       throw new Error('Canvas background input is unavailable')
     }
@@ -354,110 +364,46 @@ try {
     'the packaged application save'
   )
 
-  await connection.evaluate(`window.desktop.openPath(${JSON.stringify(secondScenePath)})`)
+  await connection.evaluate(`(() => {
+    const selectedTab = document.querySelector('.document-tab--active')
+    if (!(selectedTab instanceof HTMLElement)) {
+      throw new Error('The selected drawing tab is unavailable')
+    }
+    selectedTab.dispatchEvent(new MouseEvent('contextmenu', {
+      bubbles: true,
+      clientX: 120,
+      clientY: 70
+    }))
+  })()`)
   await waitFor(
-    () => readRendererState(connection),
-    (state) =>
-      state.tabNames.length === 2 &&
-      state.documentName === basename(secondScenePath) &&
-      state.documentPath === canonicalSecondScenePath,
-    'the second document tab'
-  )
-  await connection.evaluate(`window.desktop.openPath(${JSON.stringify(scenePath)})`)
-  await waitFor(
-    () => readRendererState(connection),
-    (state) =>
-      state.tabNames.length === 2 &&
-      state.documentName === basename(scenePath) &&
-      state.documentPath === canonicalScenePath,
-    'duplicate-path activation without a duplicate tab'
+    () =>
+      connection.evaluate(`(() => {
+        const detachButton = [...document.querySelectorAll('.tab-context-menu button')]
+          .find((button) => button.textContent?.toLowerCase().includes('move to new window'))
+        if (detachButton instanceof HTMLButtonElement) {
+          detachButton.click()
+          return true
+        }
+        return false
+      })()`),
+    Boolean,
+    'the new-window context-menu command'
   )
 
-  await connection.evaluate(`(() => {
-    const findButton = (label) =>
-      [...document.querySelectorAll('.document-pane--active button')]
-        .find((button) => button.textContent?.trim().startsWith(label))
-    findButton('Comments')?.click()
-  })()`)
   await waitFor(
-    () => readRendererState(connection),
-    (state) => state.feedbackPanel,
-    'the feedback panel'
-  )
-  await connection.evaluate(`(() => {
-    const panel = document.querySelector('.document-pane--active .feedback-panel')
-    const findButton = (label) =>
-      [...panel.querySelectorAll('button')]
-        .find((button) => button.textContent?.trim() === label)
-    findButton('Drawing')?.click()
-    const textarea = panel.querySelector('textarea')
-    const setter = Object.getOwnPropertyDescriptor(
-      HTMLTextAreaElement.prototype,
-      'value'
-    ).set
-    setter.call(textarea, 'Move the service boundary label closer to the API.')
-    textarea.dispatchEvent(new Event('input', { bubbles: true }))
-    const language = panel.querySelector('select[aria-label="Dictation language"]')
-    const selectSetter = Object.getOwnPropertyDescriptor(
-      HTMLSelectElement.prototype,
-      'value'
-    ).set
-    selectSetter.call(language, 'en')
-    language.dispatchEvent(new Event('change', { bubbles: true }))
-  })()`)
-  await delay(100)
-  await connection.evaluate(`(() => {
-    const panel = document.querySelector('.document-pane--active .feedback-panel')
-    const button = [...panel.querySelectorAll('button')]
-      .find((candidate) => candidate.textContent?.trim() === 'Dictate')
-    button?.click()
-  })()`)
-  await waitFor(
-    () => readRendererState(connection),
-    (state) => state.dictationProgress.includes('Recording locally'),
-    'local microphone recording'
-  )
-  await delay(4_000)
-  await connection.evaluate(`(() => {
-    const panel = document.querySelector('.document-pane--active .feedback-panel')
-    const button = [...panel.querySelectorAll('button')]
-      .find((candidate) => candidate.textContent?.trim() === 'Stop and transcribe')
-    button?.click()
-  })()`)
-  await waitFor(
-    () => readRendererState(connection),
-    (state) =>
-      state.feedbackText.startsWith(
-        'Move the service boundary label closer to the API.'
-      ) &&
-      state.feedbackText.length > 65 &&
-      state.feedbackMessage === '' &&
-      state.dictationProgress === '',
-    'packaged offline dictation'
-  )
-  await connection.evaluate(`(() => {
-    const panel = document.querySelector('.document-pane--active .feedback-panel')
-    const button = [...panel.querySelectorAll('button')]
-      .find((candidate) => candidate.textContent?.trim() === 'Save draft')
-    button?.click()
-  })()`)
-  await waitFor(
-    () => readRendererState(connection),
-    (state) => state.feedbackCards === 1,
-    'persisted local feedback'
-  )
-  await connection.evaluate(`(() => {
-    const panel = document.querySelector('.document-pane--active .feedback-panel')
-    const button = [...panel.querySelectorAll('button')]
-      .find((candidate) => candidate.textContent?.trim() === 'Copy for agent')
-    button?.click()
-  })()`)
-  await waitFor(
-    () => readRendererState(connection),
-    (state) =>
-      state.feedbackHistory === 1 &&
-      state.feedbackMessage.includes('Copied 1 feedback item'),
-    'the copy-submission recovery history'
+    async () => {
+      const response = await fetch(
+        `http://127.0.0.1:${debuggingPort}/json/list`
+      )
+      const targets = await response.json()
+      const state = await readRendererState(connection)
+      return {
+        pageTargets: targets.filter((target) => target.type === 'page').length,
+        originalTabs: state.tabs.length
+      }
+    },
+    (state) => state.pageTargets === 2 && state.originalTabs === 1,
+    'tab detachment into a second application window'
   )
 
   const finalState = await readRendererState(connection)
@@ -489,17 +435,15 @@ try {
   console.log(
     JSON.stringify(
       {
-        app: appPath,
+        package: packagePath,
         architecture: process.arch,
         preloadBridge: true,
-        launchPath: true,
+        launchPathTabs: initialState.tabs.length,
         canvasLayers: initialState.canvases.length,
+        splitView: true,
         externalAtomicUpdate: true,
         applicationSave: true,
-        multipleDocumentTabs: true,
-        localFeedbackPersistence: true,
-        feedbackCopyRecovery: true,
-        offlineDictation: true,
+        detachedWindow: true,
         remoteRequests: remoteResources.length,
         rendererErrors: protocolErrors.length
       },

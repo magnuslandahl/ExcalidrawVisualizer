@@ -53,11 +53,13 @@ type EditorSeed = {
 
 type ThemePreference = 'system' | 'light' | 'dark'
 type Theme = 'light' | 'dark'
+type PaneId = 'primary' | 'secondary'
 
 type TabEntry = {
   document: OpenedDocument
   event: DocumentEvent | null
   eventVersion: number
+  pane: PaneId
 }
 
 type EditorMeta = {
@@ -79,8 +81,15 @@ type DocumentEditorProps = {
   eventVersion: number
   command: EditorCommand | null
   active: boolean
+  focused: boolean
   theme: Theme
   onMetaChange: (documentId: string, meta: EditorMeta) => void
+}
+
+type ContextMenuState = {
+  documentId: string
+  x: number
+  y: number
 }
 
 type CaptureMode = 'point' | 'region' | null
@@ -212,6 +221,7 @@ function DocumentEditor({
   eventVersion,
   command,
   active,
+  focused,
   theme,
   onMetaChange
 }: DocumentEditorProps): React.JSX.Element {
@@ -1323,8 +1333,8 @@ function DocumentEditor({
           }}
           onChange={handleEditorChange}
           theme={theme}
-          autoFocus={active}
-          handleKeyboardGlobally={active}
+          autoFocus={focused}
+          handleKeyboardGlobally={focused}
           UIOptions={{
             canvasActions: {
               changeViewBackgroundColor: true,
@@ -1671,38 +1681,64 @@ export function App(): React.JSX.Element {
   const metaRef = useRef(new Map<string, EditorMeta>())
   const [tabs, setTabs] = useState<TabEntry[]>([])
   const [editorMeta, setEditorMeta] = useState<Record<string, EditorMeta>>({})
-  const [activeDocumentId, setActiveDocumentId] = useState<string | null>(null)
+  const [activeDocuments, setActiveDocuments] = useState<
+    Partial<Record<PaneId, string>>
+  >({})
+  const [focusedPane, setFocusedPane] = useState<PaneId>('primary')
   const [commands, setCommands] = useState<Record<string, EditorCommand>>({})
   const [detail, setDetail] = useState<string | null>(null)
+  const [draggingDocumentId, setDraggingDocumentId] = useState<string | null>(
+    null
+  )
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
   const [systemTheme, setSystemTheme] = useState<Theme>(() =>
     window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
   )
   const [themePreference, setThemePreference] =
     useState<ThemePreference>(readThemePreference)
   const theme = themePreference === 'system' ? systemTheme : themePreference
+  const activeDocumentId =
+    activeDocuments[focusedPane] ??
+    activeDocuments.primary ??
+    activeDocuments.secondary ??
+    null
+  const split = tabs.some((tab) => tab.pane === 'secondary')
 
-  const activateDocument = useCallback((documentId: string | null): void => {
-    setActiveDocumentId(documentId)
-    window.desktop.setActiveDocument(documentId)
-  }, [])
+  const activateDocument = useCallback(
+    (documentId: string | null, pane: PaneId = 'primary'): void => {
+      setFocusedPane(pane)
+      setActiveDocuments((current) => ({
+        ...current,
+        [pane]: documentId ?? undefined
+      }))
+      window.desktop.setActiveDocument(documentId)
+    },
+    []
+  )
 
   const handleDocumentEvent = useCallback(
     (event: DocumentEvent): void => {
       if (event.type === 'activate') {
-        activateDocument(event.documentId)
+        const pane =
+          tabs.find((tab) => tab.document.id === event.documentId)?.pane ??
+          focusedPane
+        activateDocument(event.documentId, pane)
         return
       }
 
       const documentId =
         event.type === 'opened' ? event.document.id : event.documentId
       const version = ++eventVersionRef.current
+      const pane =
+        tabs.find((tab) => tab.document.id === documentId)?.pane ?? focusedPane
       setTabs((current) => {
         const existing = current.find((tab) => tab.document.id === documentId)
         if (event.type === 'opened') {
           const next: TabEntry = {
             document: event.document,
             event,
-            eventVersion: version
+            eventVersion: version,
+            pane: existing?.pane ?? pane
           }
           return existing
             ? current.map((tab) => (tab.document.id === documentId ? next : tab))
@@ -1715,10 +1751,10 @@ export function App(): React.JSX.Element {
         )
       })
       if (event.type === 'opened') {
-        activateDocument(documentId)
+        activateDocument(documentId, pane)
       }
     },
-    [activateDocument]
+    [activateDocument, focusedPane, tabs]
   )
 
   const openPath = useCallback(async (requestedPath: string): Promise<void> => {
@@ -1758,9 +1794,12 @@ export function App(): React.JSX.Element {
       }
       const command = { version: ++commandVersionRef.current, type }
       setCommands((current) => ({ ...current, [documentId]: command }))
-      activateDocument(documentId)
+      activateDocument(
+        documentId,
+        tabs.find((tab) => tab.document.id === documentId)?.pane ?? focusedPane
+      )
     },
-    [activateDocument]
+    [activateDocument, focusedPane, tabs]
   )
 
   const handleCommand = useCallback(
@@ -1793,8 +1832,8 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     const removeDocumentListener = window.desktop.onDocumentEvent(handleDocumentEvent)
     const removeCommandListener = window.desktop.onAppCommand(handleCommand)
-    void window.desktop.rendererReady().then((launchPath) => {
-      if (launchPath) {
+    void window.desktop.rendererReady().then((launchPaths) => {
+      for (const launchPath of launchPaths) {
         void openPath(launchPath)
       }
     })
@@ -1803,6 +1842,19 @@ export function App(): React.JSX.Element {
       removeCommandListener()
     }
   }, [handleCommand, handleDocumentEvent, openPath])
+
+  useEffect(() => {
+    if (!contextMenu) {
+      return
+    }
+    const dismiss = (): void => setContextMenu(null)
+    window.addEventListener('pointerdown', dismiss)
+    window.addEventListener('blur', dismiss)
+    return () => {
+      window.removeEventListener('pointerdown', dismiss)
+      window.removeEventListener('blur', dismiss)
+    }
+  }, [contextMenu])
 
   const updateMeta = useCallback((documentId: string, meta: EditorMeta): void => {
     metaRef.current.set(documentId, meta)
@@ -1815,6 +1867,10 @@ export function App(): React.JSX.Element {
 
   const closeTab = useCallback(
     async (documentId: string): Promise<void> => {
+      const closingTab = tabs.find((tab) => tab.document.id === documentId)
+      if (!closingTab) {
+        return
+      }
       const meta = metaRef.current.get(documentId)
       if (!meta?.path && !meta?.feedbackLoaded) {
         setDetail('Wait for local feedback to finish loading before closing this tab.')
@@ -1839,17 +1895,94 @@ export function App(): React.JSX.Element {
         delete next[documentId]
         return next
       })
-      setTabs((current) => {
-        const index = current.findIndex((tab) => tab.document.id === documentId)
-        const next = current.filter((tab) => tab.document.id !== documentId)
-        if (activeDocumentId === documentId) {
-          const nextActive = next[Math.min(index, next.length - 1)]?.document.id ?? null
-          queueMicrotask(() => activateDocument(nextActive))
+      const index = tabs.findIndex((tab) => tab.document.id === documentId)
+      let next = tabs.filter((tab) => tab.document.id !== documentId)
+      if (
+        closingTab.pane === 'primary' &&
+        !next.some((tab) => tab.pane === 'primary') &&
+        next.some((tab) => tab.pane === 'secondary')
+      ) {
+        next = next.map((tab) => ({ ...tab, pane: 'primary' }))
+      }
+      setTabs(next)
+      const nextInPane =
+        next.find(
+          (tab, candidateIndex) =>
+            tab.pane === closingTab.pane && candidateIndex >= index
+        ) ??
+        [...next].reverse().find((tab) => tab.pane === closingTab.pane) ??
+        next[0]
+      setActiveDocuments((current) => {
+        const updated = { ...current }
+        if (current[closingTab.pane] === documentId) {
+          if (nextInPane) {
+            updated[closingTab.pane] = nextInPane.document.id
+          } else {
+            delete updated[closingTab.pane]
+          }
         }
+        if (!next.some((tab) => tab.pane === 'secondary')) {
+          delete updated.secondary
+        }
+        return updated
+      })
+      if (activeDocumentId === documentId) {
+        queueMicrotask(() =>
+          activateDocument(
+            nextInPane?.document.id ?? null,
+            nextInPane?.pane ?? 'primary'
+          )
+        )
+      }
+    },
+    [activateDocument, activeDocumentId, tabs]
+  )
+
+  const moveTab = useCallback(
+    (documentId: string, pane: PaneId): void => {
+      const moving = tabs.find((tab) => tab.document.id === documentId)
+      if (!moving) {
+        return
+      }
+      const targetPane =
+        pane === 'secondary' &&
+        moving.pane === 'primary' &&
+        tabs.filter((tab) => tab.pane === 'primary').length === 1
+          ? 'primary'
+          : pane
+      setTabs((current) => {
+        const next = current.map((tab) =>
+          tab.document.id === documentId
+            ? { ...tab, pane: targetPane }
+            : tab
+        )
         return next
       })
+      activateDocument(documentId, targetPane)
+      setDraggingDocumentId(null)
     },
-    [activateDocument, activeDocumentId]
+    [activateDocument, tabs]
+  )
+
+  const detachTab = useCallback(
+    async (documentId: string): Promise<void> => {
+      const meta = metaRef.current.get(documentId)
+      if (!meta?.path) {
+        setDetail('Save this drawing before moving it to another window.')
+        return
+      }
+      if (meta.dirty) {
+        setDetail('Save all changes before moving this drawing to another window.')
+        return
+      }
+      try {
+        await window.desktop.openInNewWindow(documentId)
+        await closeTab(documentId)
+      } catch (error) {
+        setDetail(messageFromError(error))
+      }
+    },
+    [closeTab]
   )
 
   const handleDrop = useCallback(
@@ -1902,38 +2035,75 @@ export function App(): React.JSX.Element {
         </div>
       </header>
 
-      <nav className="document-tabs" aria-label="Open drawings">
-        {tabs.map((tab) => {
-          const meta = editorMeta[tab.document.id]
-          const tabPath = meta?.path ?? tab.document.path
-          return (
-            <div
-              key={tab.document.id}
-              className={`document-tab${
-                tab.document.id === activeDocumentId ? ' document-tab--active' : ''
-              }`}
+      <div className={`document-tabs${split ? ' document-tabs--split' : ''}`}>
+        {(['primary', 'secondary'] as const)
+          .filter((pane) => pane === 'primary' || split)
+          .map((pane) => (
+            <nav
+              key={pane}
+              className={`document-tab-strip document-tab-strip--${pane}`}
+              aria-label={`${pane === 'primary' ? 'Primary' : 'Secondary'} drawings`}
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => {
+                event.preventDefault()
+                if (draggingDocumentId) {
+                  moveTab(draggingDocumentId, pane)
+                }
+              }}
             >
-              <button
-                type="button"
-                className="document-tab__select"
-                title={tabPath ?? 'Untitled drawing'}
-                onClick={() => activateDocument(tab.document.id)}
-              >
-                <span>{documentName(tabPath)}</span>
-                {meta?.dirty && <span aria-label="Unsaved changes">●</span>}
-              </button>
-              <button
-                type="button"
-                className="document-tab__close"
-                aria-label={`Close ${documentName(tabPath)}`}
-                onClick={() => void closeTab(tab.document.id)}
-              >
-                ×
-              </button>
-            </div>
-          )
-        })}
-      </nav>
+              {tabs
+                .filter((tab) => tab.pane === pane)
+                .map((tab) => {
+                  const meta = editorMeta[tab.document.id]
+                  const tabPath = meta?.path ?? tab.document.path
+                  return (
+                    <div
+                      key={tab.document.id}
+                      className={`document-tab${
+                        tab.document.id === activeDocuments[pane]
+                          ? ' document-tab--active'
+                          : ''
+                      }`}
+                      draggable
+                      onDragStart={() =>
+                        setDraggingDocumentId(tab.document.id)
+                      }
+                      onDragEnd={() => setDraggingDocumentId(null)}
+                      onContextMenu={(event) => {
+                        event.preventDefault()
+                        activateDocument(tab.document.id, pane)
+                        setContextMenu({
+                          documentId: tab.document.id,
+                          x: event.clientX,
+                          y: event.clientY
+                        })
+                      }}
+                    >
+                      <button
+                        type="button"
+                        className="document-tab__select"
+                        title={tabPath ?? 'Untitled drawing'}
+                        onClick={() => activateDocument(tab.document.id, pane)}
+                      >
+                        <span>{documentName(tabPath)}</span>
+                        {meta?.dirty && (
+                          <span aria-label="Unsaved changes">●</span>
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        className="document-tab__close"
+                        aria-label={`Close ${documentName(tabPath)}`}
+                        onClick={() => void closeTab(tab.document.id)}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  )
+                })}
+            </nav>
+          ))}
+      </div>
 
       {detail && (
         <div className="global-banner" role="alert">
@@ -1944,7 +2114,7 @@ export function App(): React.JSX.Element {
         </div>
       )}
 
-      <main className="workspace">
+      <main className={`workspace${split ? ' workspace--split' : ''}`}>
         {tabs.length === 0 ? (
           <section className="welcome">
             <div className="welcome-card">
@@ -1973,19 +2143,88 @@ export function App(): React.JSX.Element {
           </section>
         ) : (
           tabs.map((tab) => (
-            <DocumentEditor
+            <div
               key={tab.document.id}
-              document={tab.document}
-              event={tab.event}
-              eventVersion={tab.eventVersion}
-              command={commands[tab.document.id] ?? null}
-              active={tab.document.id === activeDocumentId}
-              theme={theme}
-              onMetaChange={updateMeta}
-            />
+              className={`editor-slot editor-slot--${tab.pane}${
+                activeDocuments[tab.pane] === tab.document.id
+                  ? ' editor-slot--active'
+                  : ''
+              }`}
+            >
+              <DocumentEditor
+                document={tab.document}
+                event={tab.event}
+                eventVersion={tab.eventVersion}
+                command={commands[tab.document.id] ?? null}
+                active={activeDocuments[tab.pane] === tab.document.id}
+                focused={
+                  focusedPane === tab.pane &&
+                  activeDocuments[tab.pane] === tab.document.id
+                }
+                theme={theme}
+                onMetaChange={updateMeta}
+              />
+            </div>
           ))
         )}
+        {draggingDocumentId && !split && tabs.length > 1 && (
+          <div
+            className="split-drop-target"
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={(event) => {
+              event.preventDefault()
+              moveTab(draggingDocumentId, 'secondary')
+            }}
+          >
+            Drop for side-by-side view
+          </div>
+        )}
       </main>
+
+      {contextMenu && (
+        <div
+          className="tab-context-menu"
+          role="menu"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          {tabs.length > 1 && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                const tab = tabs.find(
+                  (candidate) =>
+                    candidate.document.id === contextMenu.documentId
+                )
+                if (tab) {
+                  moveTab(
+                    tab.document.id,
+                    tab.pane === 'primary' ? 'secondary' : 'primary'
+                  )
+                }
+                setContextMenu(null)
+              }}
+            >
+              {tabs.find(
+                (tab) => tab.document.id === contextMenu.documentId
+              )?.pane === 'secondary'
+                ? 'Move to primary view'
+                : 'Move to side view'}
+            </button>
+          )}
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              void detachTab(contextMenu.documentId)
+              setContextMenu(null)
+            }}
+          >
+            Move to new window
+          </button>
+        </div>
+      )}
     </div>
   )
 }

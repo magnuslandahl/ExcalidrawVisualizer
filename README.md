@@ -51,6 +51,8 @@ The packages are currently unsigned for distribution.
 - Native open, save, save-as, reload, recent-files, drag-and-drop, and keyboard shortcuts
 - Multiple mounted document tabs with independent viewport, undo, autosave, watcher,
   conflict, and dirty state
+- Drag a tab into a side-by-side pane, or move a saved clean tab into another secured
+  application window from its context menu
 - Launch-path handling, single-instance forwarding, and packaged `.excalidraw` association
 - Chokidar-based watching for direct writes, atomic replacement, deletion, and recreation
 - SHA-256 application-write echo suppression
@@ -183,7 +185,7 @@ Use any of these paths:
 
 - **File > Open**, `Ctrl+O` on Windows, or `⌘O` on macOS
 - The **Open** button on the welcome screen or header
-- Drop one `.excalidraw` file onto the application window
+- Drop one or more `.excalidraw` files onto the application window
 - Launch `ExcalidrawVisualizer.exe C:\path\drawing.excalidraw`
 - Launch the macOS app with `/Applications/Excalidraw\ Visualizer.app/Contents/MacOS/ExcalidrawVisualizer /path/drawing.excalidraw`
 - Open an associated `.excalidraw` file after installing the packaged application
@@ -192,6 +194,8 @@ A second application launch forwards its file to the existing window and focuses
 Opening another file creates or activates its tab without disturbing dirty state in the
 other mounted editors. For a file-backed document, **Save As** to another canonical path
 creates a separate tab and document identity; feedback remains with the original.
+Drag a tab to the side-view target to compare two drawings. Right-click a saved tab
+with no pending edits to move it into another secured application window.
 
 ## Colors and appearance
 
