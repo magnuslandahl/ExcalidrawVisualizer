@@ -13,8 +13,8 @@ rolling and tagged releases.
 ## Agent feedback workflow
 
 Planning reference: [Visual feedback and agent integration](docs/AGENT-FEEDBACK-PROPOSAL.md).
-Stage 1 local feedback is implemented. Provider pairing and delivery remain
-future capabilities.
+Stage 2 explicit Copilot pairing and delivery are implemented. Broader provider
+adapters and walkthrough recording remain future capabilities.
 
 - [x] Record the proposed workflow and the product requirement that queued feedback
   start automatically when the agent is ready and idle; drafts remain unsent.
@@ -53,10 +53,21 @@ future capabilities.
   - [x] Verify synthetic English and Swedish transcription. On the local
     Apple-silicon package, observed cold/warm CLI latency was 7.22s/0.34s for
     short samples; packaged runtime smoke also covers capture and transcription.
-- [ ] Stage 2: implement explicit task-originated pairing, immediate/queued
+- [x] Stage 2: implement explicit task-originated pairing, immediate/queued
   delivery, replies, result review, and session-scoped recovery against the
   finalized adapter contract, with honest receipts and no automatic replay of
   ambiguous sends.
+  - [x] Add a five-minute one-time pairing capability to the task-local
+    companion, with exact loopback host checks, constant-time bearer checks,
+    generation-scoped bindings, bounded payloads, and explicit unpair.
+  - [x] Replace JSON feedback persistence with one private SQLite store and
+    migrate existing drafts/submissions while keeping connection secrets in
+    memory only.
+  - [x] Persist immutable delivery attempts before dispatch, distinguish
+    accepted/consumed/reply/idle/rejected/unknown states, and block queued
+    replay until an unknown attempt is explicitly retired.
+  - [x] Add Queue and Send now controls, task readiness/blocking state,
+    replies/results, and delivery history to the feedback panel.
 - [ ] Evaluate walkthrough recording and additional agent adapters only after the
   first complete Copilot workflow passes its acceptance gates.
 

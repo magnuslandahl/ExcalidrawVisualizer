@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
 import { FeedbackStore } from '../src/main/feedback-store'
 import {
@@ -11,6 +12,7 @@ import {
 } from '../src/shared/feedback'
 
 const testDirectories: string[] = []
+const stores: FeedbackStore[] = []
 const timestamp = (offset: number): string =>
   new Date(Date.UTC(2026, 8, 28, 10, 0, offset)).toISOString()
 
@@ -33,13 +35,15 @@ const arrangeStore = async (): Promise<{ path: string; store: FeedbackStore }> =
   const directory = join(process.cwd(), 'tests', `.feedback-store-${randomUUID()}`)
   testDirectories.push(directory)
   await mkdir(directory, { recursive: true })
-  const path = join(directory, 'feedback.json')
+  const path = join(directory, 'feedback.sqlite')
   const store = new FeedbackStore(path)
   await store.load()
+  stores.push(store)
   return { path, store }
 }
 
 afterEach(async () => {
+  stores.splice(0).forEach((store) => store.close())
   await Promise.all(
     testDirectories.splice(0).map((directory) =>
       rm(directory, { recursive: true, force: true })
@@ -54,6 +58,7 @@ describe('FeedbackStore', () => {
 
     const reloaded = new FeedbackStore(path)
     await reloaded.load()
+    stores.push(reloaded)
 
     expect(await reloaded.list('document-1')).toEqual({
       feedback: [draft('feedback-1', 'document-1')],
@@ -71,8 +76,10 @@ describe('FeedbackStore', () => {
     )
 
     expect((await store.list('document-1')).feedback).toHaveLength(12)
-    const persisted = JSON.parse(await readFile(path, 'utf8')) as { feedback: unknown[] }
-    expect(persisted.feedback).toHaveLength(12)
+    const database = new DatabaseSync(path)
+    const persisted = database.prepare('SELECT COUNT(*) AS count FROM feedback').get()
+    database.close()
+    expect(persisted?.count).toBe(12)
   })
 
   it('accepts all target variants and rejects malformed targets', async () => {
@@ -128,6 +135,30 @@ describe('FeedbackStore', () => {
     })
   })
 
+  it('restores editable drafts after a rejected delivery without changing the snapshot', async () => {
+    const { store } = await arrangeStore()
+    await store.upsertDraft(draft('feedback-1', 'document-1'))
+    await store.createSubmission({
+      id: 'submission-1',
+      documentId: 'document-1',
+      feedbackIds: ['feedback-1'],
+      documentRevision: 'sha256:revision-1',
+      createdAt: timestamp(1)
+    })
+
+    await store.restoreSubmissionDrafts('submission-1', timestamp(2))
+    const state = await store.list('document-1')
+
+    expect(state.feedback[0]).toMatchObject({
+      status: 'draft',
+      updatedAt: timestamp(2)
+    })
+    expect(state.submissions[0]?.feedback[0]).toMatchObject({
+      status: 'submitted-local',
+      updatedAt: timestamp(1)
+    })
+  })
+
   it('deletes only the requested document and preserves submission history on item deletion', async () => {
     const { store } = await arrangeStore()
     await store.upsertDraft(draft('feedback-1', 'document-1'))
@@ -151,13 +182,18 @@ describe('FeedbackStore', () => {
   })
 
   it('rejects malformed non-missing storage without resetting it', async () => {
-    const { path } = await arrangeStore()
+    const directory = join(process.cwd(), 'tests', `.feedback-store-${randomUUID()}`)
+    testDirectories.push(directory)
+    await mkdir(directory, { recursive: true })
+    const path = join(directory, 'feedback.sqlite')
+    const legacyPath = join(directory, 'feedback.json')
     const malformed = '{"schemaVersion":1,"feedback":"corrupt","submissions":[]}'
-    await writeFile(path, malformed, 'utf8')
-    const store = new FeedbackStore(path)
+    await writeFile(legacyPath, malformed, 'utf8')
+    const store = new FeedbackStore(path, legacyPath)
+    stores.push(store)
 
     await expect(store.load()).rejects.toThrow(FeedbackParseError)
-    expect(await readFile(path, 'utf8')).toBe(malformed)
+    expect(await readFile(legacyPath, 'utf8')).toBe(malformed)
   })
 
   it('moves untitled feedback to a stable file identity', async () => {
@@ -186,6 +222,82 @@ describe('FeedbackStore', () => {
         }
       ]
     })
+  })
+
+  it('migrates the legacy JSON store into SQLite once', async () => {
+    const directory = join(process.cwd(), 'tests', `.feedback-store-${randomUUID()}`)
+    testDirectories.push(directory)
+    await mkdir(directory, { recursive: true })
+    const databasePath = join(directory, 'feedback.sqlite')
+    const legacyPath = join(directory, 'feedback.json')
+    const item = draft('feedback-1', 'document-1')
+    await writeFile(
+      legacyPath,
+      `${JSON.stringify({
+        schemaVersion: 1,
+        feedback: [item],
+        submissions: []
+      })}\n`,
+      'utf8'
+    )
+    const store = new FeedbackStore(databasePath, legacyPath)
+    stores.push(store)
+
+    await store.load()
+
+    expect((await store.list('document-1')).feedback).toEqual([item])
+    await expect(readFile(legacyPath, 'utf8')).rejects.toMatchObject({
+      code: 'ENOENT'
+    })
+  })
+
+  it('persists generation-scoped bindings and honest delivery states', async () => {
+    const { store } = await arrangeStore()
+    await store.upsertDraft(draft('feedback-1', 'document-1'))
+    await store.createSubmission({
+      id: 'submission-1',
+      documentId: 'document-1',
+      feedbackIds: ['feedback-1'],
+      documentRevision: 'revision-1',
+      createdAt: timestamp(1)
+    })
+    await store.recordAgentConnection('generation-1', 'session-1', timestamp(1))
+    await store.saveAgentBinding({
+      id: 'binding-1',
+      documentId: 'document-1',
+      generation: 'generation-1',
+      documentRevision: 'revision-1',
+      createdAt: timestamp(1),
+      retiredAt: null
+    })
+    const attempt = await store.createAgentAttempt({
+      documentId: 'document-1',
+      submissionId: 'submission-1',
+      bindingId: 'binding-1',
+      generation: 'generation-1',
+      mode: 'enqueue',
+      status: 'prepared',
+      providerMessageId: null,
+      reply: null,
+      createdAt: timestamp(1),
+      updatedAt: timestamp(1),
+      detail: null
+    })
+
+    await store.updateAgentAttempt(attempt.id, {
+      status: 'unknown',
+      updatedAt: timestamp(2),
+      detail: 'Admission timed out'
+    })
+
+    expect(await store.hasUnresolvedUnknown('generation-1')).toBe(true)
+    expect(await store.findAgentBinding('document-1', 'generation-1')).toMatchObject({
+      id: 'binding-1',
+      retiredAt: null
+    })
+    expect(await store.listAgentAttempts('document-1')).toMatchObject([
+      { id: attempt.id, status: 'unknown', detail: 'Admission timed out' }
+    ])
   })
 
   it('isolates internal state from caller mutations', async () => {

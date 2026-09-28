@@ -420,9 +420,6 @@ input[type="color"]:focus-visible {
 
 .document-pane > .canvas-shell {
   grid-row: 3;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: 36px minmax(0, 1fr);
   overflow: hidden;
 }
 
@@ -725,7 +722,8 @@ input[type="color"]:focus-visible {
   bottom: 10px;
   display: flex;
   width: min(390px, calc(100% - 20px));
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   border: 1px solid var(--border);
   border-radius: 14px;
   background: var(--surface);
@@ -755,17 +753,61 @@ input[type="color"]:focus-visible {
 }
 
 .feedback-composer,
-.feedback-list {
+.feedback-list,
+.agent-connection {
   padding: 14px 16px;
 }
 
-.feedback-composer {
+.feedback-composer,
+.agent-connection {
   border-bottom: 1px solid var(--border);
 }
 
+.agent-connection {
+  display: grid;
+  gap: 8px;
+}
+
+.agent-connection p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.agent-connection textarea {
+  width: 100%;
+  resize: vertical;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--background);
+  color: var(--text);
+  font: 10px/1.35 ui-monospace, "Cascadia Code", Consolas, monospace;
+}
+
+.agent-readiness {
+  color: var(--muted);
+  font-size: 10px;
+  text-transform: capitalize;
+}
+
+.agent-readiness--idle {
+  color: #2f9e44;
+}
+
+.agent-readiness--working,
+.agent-readiness--blocked {
+  color: #f08c00;
+}
+
+.agent-readiness--error,
+.agent-readiness--disconnected {
+  color: #e03131;
+}
+
 .feedback-list {
-  min-height: 0;
-  overflow-y: auto;
+  flex: none;
 }
 
 .feedback-section-label {
@@ -853,6 +895,7 @@ input[type="color"]:focus-visible {
 
 .feedback-list-heading,
 .feedback-card > div,
+.agent-attempt > div,
 .feedback-history > div,
 .feedback-history > div > div {
   display: flex;
@@ -863,6 +906,7 @@ input[type="color"]:focus-visible {
 
 .feedback-list-heading > span:last-child,
 .feedback-card > div > span,
+.agent-attempt > div > span,
 .feedback-history time {
   color: var(--muted);
   font-size: 10px;
@@ -902,6 +946,45 @@ input[type="color"]:focus-visible {
   margin-top: 16px;
   padding-top: 12px;
   border-top: 1px solid var(--border);
+}
+
+.agent-attempts {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.agent-attempt {
+  padding: 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--background);
+}
+
+.agent-attempt > time {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.agent-attempt p {
+  margin: 7px 0;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+
+.agent-attempt--unknown,
+.agent-attempt--rejected {
+  border-color: #e03131;
+}
+
+.agent-attempt--accepted,
+.agent-attempt--consumed,
+.agent-attempt--reply-observed,
+.agent-attempt--idle-after-turn {
+  border-color: #2f9e44;
 }
 
 .feedback-history > div > div {

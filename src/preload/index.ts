@@ -14,6 +14,7 @@ import type {
   LocalFeedbackSubmission,
   LocalFeedbackSubmissionInput
 } from '../shared/feedback'
+import type { AgentEvent } from '../shared/agent-feedback'
 
 const api: DesktopApi = {
   newDocument: () =>
@@ -75,6 +76,31 @@ const api: DesktopApi = {
       feedbackId,
       updatedAt
     ) as Promise<LocalFeedback>,
+  pairAgent: (input) =>
+    ipcRenderer.invoke(ipcChannels.agentPair, input) as ReturnType<
+      DesktopApi['pairAgent']
+    >,
+  unpairAgent: () =>
+    ipcRenderer.invoke(ipcChannels.agentUnpair) as ReturnType<
+      DesktopApi['unpairAgent']
+    >,
+  getAgentStatus: () =>
+    ipcRenderer.invoke(ipcChannels.agentStatus) as ReturnType<
+      DesktopApi['getAgentStatus']
+    >,
+  listAgentActivity: (documentId) =>
+    ipcRenderer.invoke(ipcChannels.agentList, documentId) as ReturnType<
+      DesktopApi['listAgentActivity']
+    >,
+  deliverFeedback: (input) =>
+    ipcRenderer.invoke(ipcChannels.agentDeliver, input) as ReturnType<
+      DesktopApi['deliverFeedback']
+    >,
+  retireAgentAttempt: (attemptId) =>
+    ipcRenderer.invoke(
+      ipcChannels.agentRetireAttempt,
+      attemptId
+    ) as ReturnType<DesktopApi['retireAgentAttempt']>,
   rendererReady: () =>
     ipcRenderer.invoke(ipcChannels.rendererReady) as Promise<string[]>,
   getDroppedFilePath: (file) => webUtils.getPathForFile(file),
@@ -89,6 +115,12 @@ const api: DesktopApi = {
       listener(payload)
     ipcRenderer.on(ipcChannels.appCommand, handler)
     return () => ipcRenderer.removeListener(ipcChannels.appCommand, handler)
+  },
+  onAgentEvent: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: AgentEvent): void =>
+      listener(payload)
+    ipcRenderer.on(ipcChannels.agentEvent, handler)
+    return () => ipcRenderer.removeListener(ipcChannels.agentEvent, handler)
   }
 }
 

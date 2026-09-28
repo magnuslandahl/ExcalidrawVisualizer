@@ -13,20 +13,28 @@ import { join } from "node:path";
 import { URL } from "node:url";
 import { createCanvas, joinSession } from "@github/copilot-sdk/extension";
 
-const MAX_BODY_BYTES = 16 * 1024;
-const MAX_PROMPT_LENGTH = 4_000;
+const MAX_BODY_BYTES = 1024 * 1024;
+const MAX_DIAGNOSTIC_PROMPT_LENGTH = 4_000;
+const MAX_PROVIDER_PROMPT_LENGTH = 512 * 1024;
 const MAX_DISPLAY_PROMPT_LENGTH = 240;
 const PROTOCOL_VERSION = 1;
+const PAIRING_TTL_MS = 5 * 60 * 1000;
 const connectionGeneration = randomBytes(16).toString("hex");
 const canvasServers = new Map();
 const recentEvents = [];
 const admittedMessages = [];
+const pendingCorrelationEvents = [];
+const integrationEvents = [];
+const bindings = new Map();
 let eventSequence = 0;
+let integrationEventSequence = 0;
 
 let session;
 let bridge;
 let descriptorPath;
 let descriptorToken;
+let bootstrapCapability;
+let activeConnection;
 let shuttingDown = false;
 
 const runtimeState = {
@@ -45,18 +53,146 @@ function recordEvent(type, timestamp = new Date().toISOString()) {
   }
 }
 
+function recordIntegrationEvent(type, data, createdAt = new Date().toISOString()) {
+  integrationEventSequence += 1;
+  integrationEvents.push({
+    sequence: integrationEventSequence,
+    type,
+    createdAt,
+    data
+  });
+  if (integrationEvents.length > 2000) {
+    integrationEvents.shift();
+  }
+}
+
+function replyText(data) {
+  for (const value of [data?.content, data?.text, data?.message]) {
+    if (typeof value === "string" && value.trim()) {
+      return value.slice(0, 100_000);
+    }
+  }
+  return null;
+}
+
+function applyCorrelationEvent(event) {
+  if (event.type === "user.message") {
+    const admitted = admittedMessages.find(
+      (entry) => entry.messageId === event.data.messageId
+    );
+    if (!admitted) {
+      return false;
+    }
+    admitted.delivery = event.data.delivery ?? null;
+    admitted.consumedAt = event.timestamp;
+    admitted.turnId = event.data.turnId ?? null;
+    if (admitted.attemptId) {
+      recordIntegrationEvent(
+        "submission.consumed",
+        {
+          attemptId: admitted.attemptId,
+          submissionId: admitted.submissionId,
+          messageId: admitted.messageId,
+          delivery: admitted.delivery,
+          turnId: admitted.turnId
+        },
+        event.timestamp
+      );
+    }
+    return true;
+  }
+  if (event.type === "assistant.message") {
+    const admitted = admittedMessages.find(
+      (entry) => entry.messageId === event.data.originatingMessageId
+    );
+    if (!admitted) {
+      return false;
+    }
+    admitted.assistantMessageId = event.data.messageId;
+    admitted.resultObservedAt = event.timestamp;
+    if (admitted.attemptId) {
+      recordIntegrationEvent(
+        "submission.reply",
+        {
+          attemptId: admitted.attemptId,
+          submissionId: admitted.submissionId,
+          messageId: admitted.messageId,
+          assistantMessageId: admitted.assistantMessageId,
+          reply: replyText(event.data)
+        },
+        event.timestamp
+      );
+    }
+    return true;
+  }
+  if (event.type === "assistant.turn_end") {
+    let matched = false;
+    for (const admitted of admittedMessages) {
+      if (
+        admitted.turnId === event.data.turnId &&
+        admitted.consumedAt &&
+        !admitted.turnEndedAt &&
+        event.timestamp >= admitted.consumedAt
+      ) {
+        admitted.turnEndedAt = event.timestamp;
+        matched = true;
+      }
+    }
+    return matched;
+  }
+  if (event.type === "session.idle") {
+    let matched = false;
+    for (const admitted of admittedMessages) {
+      if (
+        admitted.consumedAt &&
+        !admitted.sessionIdleAt &&
+        event.timestamp >= admitted.consumedAt
+      ) {
+        admitted.sessionIdleAt = event.timestamp;
+        matched = true;
+        if (admitted.attemptId) {
+          recordIntegrationEvent(
+            "submission.idle",
+            {
+              attemptId: admitted.attemptId,
+              submissionId: admitted.submissionId,
+              messageId: admitted.messageId,
+              turnId: admitted.turnId
+            },
+            event.timestamp
+          );
+        }
+      }
+    }
+    return matched;
+  }
+  return false;
+}
+
+function bufferCorrelationEvent(event) {
+  pendingCorrelationEvents.push(event);
+  if (pendingCorrelationEvents.length > 100) {
+    pendingCorrelationEvents.shift();
+  }
+}
+
+function reconcileCorrelationEvents() {
+  for (let index = 0; index < pendingCorrelationEvents.length; ) {
+    if (applyCorrelationEvent(pendingCorrelationEvents[index])) {
+      pendingCorrelationEvents.splice(index, 1);
+    } else {
+      index += 1;
+    }
+  }
+}
+
 function updateRuntimeState(event) {
   recordEvent(event.type, event.timestamp);
 
   switch (event.type) {
     case "user.message": {
-      const admitted = admittedMessages.find(
-        (entry) => entry.messageId === event.data.messageId
-      );
-      if (admitted) {
-        admitted.delivery = event.data.delivery ?? null;
-        admitted.consumedAt = event.timestamp;
-        admitted.turnId = event.data.turnId ?? null;
+      if (!applyCorrelationEvent(event)) {
+        bufferCorrelationEvent(event);
       }
       break;
     }
@@ -68,26 +204,15 @@ function updateRuntimeState(event) {
       }
       break;
     case "assistant.message": {
-      const admitted = admittedMessages.find(
-        (entry) => entry.messageId === event.data.originatingMessageId
-      );
-      if (admitted) {
-        admitted.assistantMessageId = event.data.messageId;
-        admitted.resultObservedAt = event.timestamp;
+      if (!applyCorrelationEvent(event)) {
+        bufferCorrelationEvent(event);
       }
       break;
     }
     case "assistant.turn_end":
       if (!event.agentId) {
-        for (const admitted of admittedMessages) {
-          if (
-            admitted.turnId === event.data.turnId &&
-            admitted.consumedAt &&
-            !admitted.turnEndedAt &&
-            event.timestamp >= admitted.consumedAt
-          ) {
-            admitted.turnEndedAt = event.timestamp;
-          }
+        if (!applyCorrelationEvent(event)) {
+          bufferCorrelationEvent(event);
         }
         if (runtimeState.activeTurnId === event.data.turnId) {
           runtimeState.activeTurnId = null;
@@ -127,10 +252,8 @@ function updateRuntimeState(event) {
       }
       break;
     case "session.idle":
-      for (const admitted of admittedMessages) {
-        if (admitted.consumedAt && !admitted.sessionIdleAt) {
-          admitted.sessionIdleAt = event.timestamp;
-        }
+      if (!applyCorrelationEvent(event)) {
+        bufferCorrelationEvent(event);
       }
       runtimeState.readiness = "idle";
       runtimeState.blockedReason = null;
@@ -153,9 +276,29 @@ function updateRuntimeState(event) {
       runtimeState.activeTurnId = null;
       break;
   }
+
+  if (
+    event.type === "assistant.turn_start" ||
+    event.type === "permission.requested" ||
+    event.type === "permission.completed" ||
+    event.type === "user_input.requested" ||
+    event.type === "user_input.completed" ||
+    event.type === "session.idle" ||
+    event.type === "session.error" ||
+    event.type === "session.shutdown"
+  ) {
+    recordIntegrationEvent(
+      "connection.status",
+      {
+        readiness: runtimeState.readiness,
+        blockedReason: runtimeState.blockedReason
+      },
+      event.timestamp
+    );
+  }
 }
 
-function validateSubmission(input) {
+function validateSubmission(input, maximumPromptLength) {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw new Error("The request body must be a JSON object.");
   }
@@ -164,8 +307,8 @@ function validateSubmission(input) {
   if (!prompt) {
     throw new Error("prompt must be a non-empty string.");
   }
-  if (prompt.length > MAX_PROMPT_LENGTH) {
-    throw new Error(`prompt must not exceed ${MAX_PROMPT_LENGTH} characters.`);
+  if (prompt.length > maximumPromptLength) {
+    throw new Error(`prompt must not exceed ${maximumPromptLength} characters.`);
   }
 
   const mode = input.mode ?? "enqueue";
@@ -189,16 +332,23 @@ function validateSubmission(input) {
   return { prompt, mode, displayPrompt };
 }
 
-async function submitMessage(input) {
+async function submitMessage(input, tracking = {}) {
   if (!session) {
     throw new Error("The Copilot session is not connected.");
   }
 
-  const submission = validateSubmission(input);
+  const submission = validateSubmission(
+    input,
+    tracking.attemptId
+      ? MAX_PROVIDER_PROMPT_LENGTH
+      : MAX_DIAGNOSTIC_PROMPT_LENGTH
+  );
   const messageId = await session.send(submission);
   const admittedAt = new Date().toISOString();
   admittedMessages.push({
     connectionGeneration,
+    attemptId: tracking.attemptId ?? null,
+    submissionId: tracking.submissionId ?? null,
     messageId,
     mode: submission.mode,
     admittedAt,
@@ -213,6 +363,7 @@ async function submitMessage(input) {
   if (admittedMessages.length > 20) {
     admittedMessages.shift();
   }
+  reconcileCorrelationEvents();
 
   return {
     messageId,
@@ -252,6 +403,180 @@ async function getStatus() {
     queueError: queueError ?? null,
     admittedMessages: [...admittedMessages],
     recentEvents: [...recentEvents]
+  };
+}
+
+function boundedString(value, label, maximum = 128) {
+  if (
+    typeof value !== "string" ||
+    !value ||
+    value.length > maximum ||
+    !/^[\x20-\x7e]+$/.test(value)
+  ) {
+    throw new Error(`${label} must be a non-empty ASCII string of at most ${maximum} characters.`);
+  }
+  return value;
+}
+
+function createPairingCode() {
+  if (!bridge) {
+    throw new Error("The companion bridge is not ready.");
+  }
+  bootstrapCapability = {
+    token: randomBytes(32).toString("base64url"),
+    expiresAt: new Date(Date.now() + PAIRING_TTL_MS).toISOString()
+  };
+  const payload = {
+    endpoint: bridge.descriptor.endpoint,
+    bootstrapToken: bootstrapCapability.token,
+    generation: connectionGeneration,
+    expiresAt: bootstrapCapability.expiresAt
+  };
+  return `evp1:${Buffer.from(JSON.stringify(payload)).toString("base64url")}`;
+}
+
+function pairVisualizer(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error("The pairing request must be an object.");
+  }
+  if (
+    !bootstrapCapability ||
+    new Date(bootstrapCapability.expiresAt).getTime() <= Date.now() ||
+    typeof input.bootstrapToken !== "string" ||
+    !tokenMatches(input.bootstrapToken, bootstrapCapability.token)
+  ) {
+    throw new Error("The pairing capability is invalid or expired.");
+  }
+  boundedString(input.visualizerNonce, "visualizerNonce", 128);
+  const connectionToken = randomBytes(32).toString("base64url");
+  activeConnection = {
+    token: connectionToken,
+    visualizerNonce: input.visualizerNonce,
+    pairedAt: new Date().toISOString()
+  };
+  bootstrapCapability = undefined;
+  bindings.clear();
+  recordIntegrationEvent("connection.paired", {
+    sessionId: session.sessionId,
+    generation: connectionGeneration
+  });
+  return {
+    protocolVersion: PROTOCOL_VERSION,
+    connectionToken,
+    connectionGeneration,
+    sessionId: session.sessionId,
+    readiness: runtimeState.readiness,
+    blockedReason: runtimeState.blockedReason,
+    lastEventSequence: integrationEventSequence,
+    capabilities: {
+      delivery: ["enqueue", "immediate"],
+      events: true,
+      textFeedback: true
+    }
+  };
+}
+
+function createBinding(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error("The binding request must be an object.");
+  }
+  const documentId = boundedString(input.documentId, "documentId");
+  boundedString(input.canonicalPathHash, "canonicalPathHash");
+  boundedString(input.savedRevision, "savedRevision", 1024);
+  const existing = [...bindings.values()].find(
+    (binding) => binding.documentId === documentId && !binding.retiredAt
+  );
+  if (existing) {
+    return {
+      bindingId: existing.id,
+      generation: connectionGeneration,
+      createdAt: existing.createdAt
+    };
+  }
+  const binding = {
+    id: randomBytes(16).toString("hex"),
+    documentId,
+    createdAt: new Date().toISOString(),
+    retiredAt: null
+  };
+  bindings.set(binding.id, binding);
+  return {
+    bindingId: binding.id,
+    generation: connectionGeneration,
+    createdAt: binding.createdAt
+  };
+}
+
+async function submitIntegration(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error("The submission request must be an object.");
+  }
+  const attemptId = boundedString(input.attemptId, "attemptId");
+  const submissionId = boundedString(input.submissionId, "submissionId");
+  const bindingId = boundedString(input.bindingId, "bindingId");
+  if (input.bindingGeneration !== connectionGeneration) {
+    throw new Error("The binding generation is stale.");
+  }
+  const binding = bindings.get(bindingId);
+  if (!binding || binding.retiredAt) {
+    throw new Error("The binding is unavailable.");
+  }
+  boundedString(input.documentRevision, "documentRevision", 1024);
+  boundedString(input.dispatchRevision, "dispatchRevision", 1024);
+  const submission = await submitMessage(
+    {
+      prompt: input.prompt,
+      mode: input.deliveryIntent,
+      displayPrompt: input.displayPrompt
+    },
+    { attemptId, submissionId }
+  );
+  recordIntegrationEvent("submission.accepted", {
+    attemptId,
+    submissionId,
+    messageId: submission.messageId,
+    mode: submission.mode
+  }, submission.admittedAt);
+  return {
+    status: "accepted",
+    messageId: submission.messageId,
+    admittedAt: submission.admittedAt
+  };
+}
+
+function revokeBinding(bindingId) {
+  const binding = bindings.get(bindingId);
+  if (!binding) {
+    throw new Error("The binding was not found.");
+  }
+  binding.retiredAt = new Date().toISOString();
+  return { bindingId, retiredAt: binding.retiredAt };
+}
+
+function listIntegrationEvents(url) {
+  const cursor = Number(url.searchParams.get("cursor") ?? "0");
+  const limit = Number(url.searchParams.get("limit") ?? "100");
+  if (!Number.isInteger(cursor) || cursor < 0) {
+    throw new Error("cursor must be a non-negative integer.");
+  }
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+    throw new Error("limit must be between 1 and 100.");
+  }
+  const firstAvailableSequence = integrationEvents[0]?.sequence;
+  if (
+    firstAvailableSequence !== undefined &&
+    cursor < firstAvailableSequence - 1
+  ) {
+    throw new Error("The event cursor expired; explicit re-pairing is required.");
+  }
+  const events = integrationEvents
+    .filter((event) => event.sequence > cursor)
+    .slice(0, limit);
+  return {
+    events,
+    nextCursor: events.at(-1)?.sequence ?? cursor,
+    readiness: runtimeState.readiness,
+    blockedReason: runtimeState.blockedReason
   };
 }
 
@@ -343,7 +668,7 @@ function renderCanvasHtml(instanceId, canvasToken) {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Agent feedback Stage 0</title>
+    <title>Excalidraw Visualizer companion</title>
     <style>
       :root { color-scheme: light dark; }
       * { box-sizing: border-box; }
@@ -401,8 +726,16 @@ function renderCanvasHtml(instanceId, canvasToken) {
     </style>
   </head>
   <body>
-    <h1>Agent feedback Stage 0</h1>
-    <p>Diagnostic surface for the current Copilot session. This is not product UI.</p>
+    <h1>Excalidraw Visualizer companion</h1>
+    <p>Pair Visualizer explicitly with this Copilot task, or inspect the diagnostic state.</p>
+
+    <section class="card">
+      <h2>Pair Excalidraw Visualizer</h2>
+      <p>Generate a one-time code, then paste it into Visualizer within five minutes.</p>
+      <button id="pair" type="button">Copy one-time pairing code</button>
+      <textarea id="pair-code" readonly hidden aria-label="Pairing code"></textarea>
+      <p id="pair-result" hidden></p>
+    </section>
 
     <section class="card">
       <div class="grid">
@@ -497,6 +830,41 @@ function renderCanvasHtml(instanceId, canvasToken) {
         }
       });
 
+      document.querySelector("#pair").addEventListener("click", async () => {
+        const button = document.querySelector("#pair");
+        const result = document.querySelector("#pair-result");
+        button.disabled = true;
+        result.hidden = true;
+        result.className = "";
+        try {
+          const pairing = await readResponse(await fetch("/api/pairing", {
+            method: "POST",
+            headers
+          }));
+          const code = document.querySelector("#pair-code");
+          code.value = pairing.pairingCode;
+          code.hidden = false;
+          try {
+            await navigator.clipboard.writeText(pairing.pairingCode);
+            result.textContent =
+              "Pairing code copied. It expires at " +
+              new Date(pairing.expiresAt).toLocaleTimeString() + ".";
+          } catch {
+            code.select();
+            result.textContent =
+              "Copy the code above. It expires at " +
+              new Date(pairing.expiresAt).toLocaleTimeString() + ".";
+          }
+          result.className = "success";
+        } catch (cause) {
+          result.textContent = cause instanceof Error ? cause.message : String(cause);
+          result.className = "error";
+        } finally {
+          result.hidden = false;
+          button.disabled = false;
+        }
+      });
+
       refreshStatus();
       setInterval(refreshStatus, 1500);
     </script>
@@ -542,6 +910,14 @@ async function startCanvasServer(instanceId) {
         sendJson(response, 202, await submitMessage(await readJsonBody(request)));
         return;
       }
+      if (request.method === "POST" && url.pathname === "/api/pairing") {
+        const pairingCode = createPairingCode();
+        sendJson(response, 201, {
+          pairingCode,
+          expiresAt: bootstrapCapability.expiresAt
+        });
+        return;
+      }
       sendJson(response, 404, { error: "Not found." });
     } catch (error) {
       sendJson(response, 400, {
@@ -561,16 +937,25 @@ async function startCanvasServer(instanceId) {
 
 function createDiagnosticCanvas() {
   return createCanvas({
-    id: "excalidraw-visualizer-stage0",
-    displayName: "Excalidraw Visualizer Stage 0",
+    id: "excalidraw-visualizer-companion",
+    displayName: "Excalidraw Visualizer Companion",
     description:
-      "Inspect and exercise same-session Excalidraw Visualizer delivery capabilities.",
+      "Pair Excalidraw Visualizer with this task and inspect delivery state.",
     actions: [
       {
         name: "get_status",
         description:
           "Return the observed session readiness, queue summary, and host capabilities.",
         handler: getStatus
+      },
+      {
+        name: "create_pairing_code",
+        description:
+          "Create a five-minute one-time pairing code for Excalidraw Visualizer.",
+        handler: () => ({
+          pairingCode: createPairingCode(),
+          expiresAt: bootstrapCapability.expiresAt
+        })
       },
       {
         name: "submit_probe",
@@ -583,7 +968,7 @@ function createDiagnosticCanvas() {
             prompt: {
               type: "string",
               minLength: 1,
-              maxLength: MAX_PROMPT_LENGTH
+              maxLength: MAX_DIAGNOSTIC_PROMPT_LENGTH
             },
             mode: {
               type: "string",
@@ -607,7 +992,7 @@ function createDiagnosticCanvas() {
         canvasServers.set(context.instanceId, entry);
       }
       return {
-        title: "Agent feedback Stage 0",
+        title: "Excalidraw Visualizer companion",
         status: runtimeState.readiness,
         url: entry.url
       };
@@ -632,19 +1017,67 @@ async function startBridgeServer() {
       sendText(response, 400, "Invalid Host header.");
       return;
     }
-    if (!hasBearerToken(request, token)) {
-      sendJson(response, 401, { error: "Authentication required." });
-      return;
-    }
-
     const url = new URL(request.url ?? "/", `http://127.0.0.1:${port}`);
     try {
+      if (request.method === "POST" && url.pathname === "/v1/pair") {
+        sendJson(response, 201, pairVisualizer(await readJsonBody(request)));
+        return;
+      }
+      const diagnosticAuthenticated = hasBearerToken(request, token);
+      const connectionAuthenticated =
+        activeConnection &&
+        hasBearerToken(request, activeConnection.token);
+      if (!diagnosticAuthenticated && !connectionAuthenticated) {
+        sendJson(response, 401, { error: "Authentication required." });
+        return;
+      }
       if (request.method === "GET" && url.pathname === "/v1/status") {
         sendJson(response, 200, await getStatus());
         return;
       }
-      if (request.method === "POST" && url.pathname === "/v1/messages") {
+      if (
+        diagnosticAuthenticated &&
+        request.method === "POST" &&
+        url.pathname === "/v1/messages"
+      ) {
         sendJson(response, 202, await submitMessage(await readJsonBody(request)));
+        return;
+      }
+      if (!connectionAuthenticated) {
+        sendJson(response, 403, { error: "A paired connection is required." });
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/v1/bindings") {
+        sendJson(response, 201, createBinding(await readJsonBody(request)));
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/v1/submissions") {
+        sendJson(
+          response,
+          202,
+          await submitIntegration(await readJsonBody(request))
+        );
+        return;
+      }
+      if (request.method === "GET" && url.pathname === "/v1/events") {
+        sendJson(response, 200, listIntegrationEvents(url));
+        return;
+      }
+      const revokeMatch = url.pathname.match(
+        /^\/v1\/bindings\/([A-Za-z0-9._-]{1,128})\/revoke$/
+      );
+      if (request.method === "POST" && revokeMatch) {
+        sendJson(response, 200, revokeBinding(revokeMatch[1]));
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/v1/unpair") {
+        const retiredAt = new Date().toISOString();
+        for (const binding of bindings.values()) {
+          binding.retiredAt ??= retiredAt;
+        }
+        activeConnection = undefined;
+        recordIntegrationEvent("connection.unpaired", { retiredAt });
+        sendJson(response, 200, { retiredAt });
         return;
       }
       sendJson(response, 404, { error: "Not found." });

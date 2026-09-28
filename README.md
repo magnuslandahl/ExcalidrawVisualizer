@@ -67,11 +67,13 @@ The packages are currently unsigned for distribution.
 - Local feedback drafts anchored to selected elements, points, rectangular regions, or
   the whole drawing; overlays never enter the `.excalidraw` file
 - Persistent feedback history with clipboard submission and copy-again recovery
+- Explicit one-time pairing with the current GitHub Copilot task, with separate
+  queue/send-now delivery, admission receipts, replies, blocked state, and result history
 - Bundled offline English, Swedish, and automatic-language dictation using a pinned
   `whisper.cpp` helper, multilingual model, and Silero VAD
 - Fully local JavaScript, CSS, worker chunks, and Excalidraw fonts
 
-## Local feedback and planned agent integration
+## Local feedback and GitHub Copilot pairing
 
 Open **Comments** on a drawing to create feedback for selected elements, a point, a
 region, or the whole drawing. Drafts and copy history are stored in the application's
@@ -85,12 +87,24 @@ transcript. Audio is converted to bounded PCM, processed locally with VAD, and r
 after completion, cancellation, or failure. Existing typed text is preserved when
 microphone permission or transcription fails.
 
-The [agent feedback proposal](docs/AGENT-FEEDBACK-PROPOSAL.md) describes the remaining
-same-session GitHub Copilot desktop integration. Automatic immediate/queued delivery,
-pairing, replies, and result review are not shipped yet. Stage 0 feasibility is
-finalized for explicit pairing initiated inside the intended Copilot task. The tested
-host exposes no supported global task discovery/activation/creation route, so seamless
-reverse startup is an explicit limitation rather than an advertised feature.
+To deliver feedback directly to the intended GitHub Copilot task:
+
+1. Open the **Excalidraw Visualizer Companion** canvas in that Copilot task.
+2. Choose **Copy one-time pairing code**.
+3. In Visualizer, open **Comments**, paste the code under **Copilot task**, and pair.
+4. Compose feedback and choose **Queue for paired task** or **Send now**.
+
+Pairing capabilities expire after five minutes and connection secrets remain in memory
+only. Restarting either side requires explicit re-pairing. **Accepted** means Copilot
+admitted the message; consumed, reply observed, and idle-after-turn are reported
+separately and do not claim that a requested file change was correct or accepted.
+Unknown admissions are never replayed automatically and must be retired explicitly
+before later queued work can continue.
+
+Visualizer does not scan, infer, activate, or create Copilot tasks. The tested host
+exposes no supported global task discovery route, so pairing must begin inside the
+intended task. The [agent feedback proposal](docs/AGENT-FEEDBACK-PROPOSAL.md) and
+[Stage 0 capability record](docs/AGENT-FEEDBACK-STAGE0.md) document that boundary.
 
 ## Requirements
 
@@ -268,18 +282,26 @@ cleanest watcher and Git behavior.
 
 ## Offline guarantee
 
-After installation, the application does not require a development server, CDN, hosted
-Excalidraw service, or network API. Excalidraw JavaScript, styles, lazy chunks, workers,
+After installation, drawing, editing, feedback drafting, persistence, and dictation do
+not require a development server, CDN, hosted Excalidraw service, or network API.
+Excalidraw JavaScript, styles, lazy chunks, workers,
 and fonts are bundled in the application. The production build removes Excalidraw's
 upstream CDN font fallback so missing local assets fail closed instead of attempting a
-network request. The renderer denies remote window creation and navigation. Electron permissions are
+network request. Optional Copilot delivery uses only an authenticated loopback
+connection to the explicitly paired task-local companion. Visualizer sends no request
+to a remote endpoint; the Copilot host may process the feedback through its configured
+service after the user chooses Queue or Send now. Only the frozen feedback text,
+target metadata, opaque document identity, readable filename, and revision are sent;
+the drawing file and dictation audio are not uploaded by Visualizer.
+
+The renderer denies remote window creation and navigation. Electron permissions are
 denied except for an audio-only microphone request from the trusted renderer after the
 user starts dictation. The Content Security Policy
 allows only application resources, data/blob media, and the localhost WebSocket used by
 the development server.
 
-The application does not add telemetry and does not intentionally perform network
-requests.
+The application does not add telemetry, update checks, or general outbound network
+access.
 
 ## Automated releases and versioning
 

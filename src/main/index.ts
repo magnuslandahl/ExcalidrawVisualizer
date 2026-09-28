@@ -1,6 +1,7 @@
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { app, BrowserWindow, clipboard, dialog, ipcMain, session } from 'electron'
 import { DictationService } from './dictation-service'
+import { AgentFeedbackService } from './agent-feedback-service'
 import { DocumentRegistry } from './document-registry'
 import { FeedbackStore } from './feedback-store'
 import { feedbackDocumentStorageKey } from './feedback-document'
@@ -13,12 +14,18 @@ import {
   type SaveResult,
   type SaveRequest
 } from '../shared/contracts'
-import type {
-  FeedbackDocumentState,
-  LocalFeedback,
-  LocalFeedbackSubmission,
-  LocalFeedbackSubmissionInput
+import {
+  parseLocalFeedbackSubmissionInput,
+  type FeedbackDocumentState,
+  type LocalFeedback,
+  type LocalFeedbackSubmission,
+  type LocalFeedbackSubmissionInput
 } from '../shared/feedback'
+import {
+  parseAgentPairingInput,
+  type AgentDeliveryInput,
+  type AgentEvent
+} from '../shared/agent-feedback'
 
 type WindowContext = {
   window: BrowserWindow
@@ -31,8 +38,10 @@ type WindowContext = {
 }
 
 const windows = new Map<number, WindowContext>()
+const agentDocumentRoutes = new Map<string, Map<number, string>>()
 const pendingLaunchPaths: string[] = []
 let feedbackStore: FeedbackStore | undefined
+let agentFeedbackService: AgentFeedbackService | undefined
 let dictationService: DictationService | undefined
 let recentFiles: RecentFiles | undefined
 
@@ -60,6 +69,41 @@ const sendDocumentEvent = (
   if (!window.isDestroyed()) {
     window.webContents.send(ipcChannels.documentEvent, event)
   }
+}
+
+const broadcastAgentEvent = (event: AgentEvent): void => {
+  if (event.type === 'attempt') {
+    const routes = agentDocumentRoutes.get(event.documentId)
+    if (!routes) {
+      return
+    }
+    for (const [windowId, documentId] of routes) {
+      const context = windows.get(windowId)
+      if (context && !context.window.isDestroyed()) {
+        context.window.webContents.send(ipcChannels.agentEvent, {
+          ...event,
+          documentId,
+          attempt: { ...event.attempt, documentId }
+        })
+      }
+    }
+    return
+  }
+  for (const context of windows.values()) {
+    if (!context.window.isDestroyed()) {
+      context.window.webContents.send(ipcChannels.agentEvent, event)
+    }
+  }
+}
+
+const registerAgentDocumentRoute = (
+  context: WindowContext,
+  storageDocumentId: string,
+  publicDocumentId: string
+): void => {
+  const routes = agentDocumentRoutes.get(storageDocumentId) ?? new Map()
+  routes.set(context.window.id, publicDocumentId)
+  agentDocumentRoutes.set(storageDocumentId, routes)
 }
 
 const refreshApplicationMenu = (): void => {
@@ -143,6 +187,12 @@ const createWindow = (initialPaths: readonly string[] = []): BrowserWindow => {
   window.on('ready-to-show', () => window.show())
   window.on('closed', () => {
     windows.delete(window.id)
+    for (const [storageDocumentId, routes] of agentDocumentRoutes) {
+      routes.delete(window.id)
+      if (routes.size === 0) {
+        agentDocumentRoutes.delete(storageDocumentId)
+      }
+    }
     void context.registry.close()
   })
 
@@ -267,6 +317,20 @@ const moveUntitledFeedbackAfterSave = async (
     }
   }
   return null
+}
+
+const requireAgentDeliveryInput = (value: unknown): AgentDeliveryInput => {
+  if (!value || typeof value !== 'object' || !('mode' in value)) {
+    throw new TypeError('Invalid agent feedback delivery')
+  }
+  const { mode, ...submission } = value as Record<string, unknown>
+  if (mode !== 'enqueue' && mode !== 'immediate') {
+    throw new TypeError('Invalid agent feedback delivery mode')
+  }
+  return {
+    ...parseLocalFeedbackSubmissionInput(submission),
+    mode
+  }
 }
 
 const registerIpc = (): void => {
@@ -466,6 +530,93 @@ const registerIpc = (): void => {
         .then((item) => exposeFeedback(item, id))
     }
   )
+  ipcMain.handle(ipcChannels.agentPair, (_event, input: unknown) => {
+    if (!agentFeedbackService) {
+      throw new Error('Agent feedback integration is unavailable')
+    }
+    return agentFeedbackService.pair(parseAgentPairingInput(input).pairingCode)
+  })
+  ipcMain.handle(ipcChannels.agentUnpair, () => {
+    if (!agentFeedbackService) {
+      throw new Error('Agent feedback integration is unavailable')
+    }
+    return agentFeedbackService.unpair()
+  })
+  ipcMain.handle(ipcChannels.agentStatus, () => {
+    if (!agentFeedbackService) {
+      throw new Error('Agent feedback integration is unavailable')
+    }
+    return agentFeedbackService.status
+  })
+  ipcMain.handle(ipcChannels.agentList, async (event, documentId: unknown) => {
+    if (!agentFeedbackService || !feedbackStore) {
+      throw new Error('Agent feedback integration is unavailable')
+    }
+    const context = requireWindowContext(event.sender)
+    const id = requireDocumentId(documentId)
+    const storageDocumentId = feedbackStorageKey(context, id)
+    registerAgentDocumentRoute(context, storageDocumentId, id)
+    const attempts =
+      await feedbackStore.listAgentAttempts(storageDocumentId)
+    return {
+      connection: agentFeedbackService.status,
+      attempts: attempts.map((attempt) => ({ ...attempt, documentId: id }))
+    }
+  })
+  ipcMain.handle(ipcChannels.agentDeliver, async (event, input: unknown) => {
+    if (!agentFeedbackService || !feedbackStore) {
+      throw new Error('Agent feedback integration is unavailable')
+    }
+    const context = requireWindowContext(event.sender)
+    const validInput = requireAgentDeliveryInput(input)
+    const documentId = requireDocumentId(validInput.documentId)
+    const document = context.registry.getDocument(documentId)
+    const storageDocumentId = feedbackStorageKey(context, documentId)
+    const { mode, ...submissionInput } = validInput
+    const generation = await agentFeedbackService.preflight(mode)
+    registerAgentDocumentRoute(context, storageDocumentId, documentId)
+    const submission = exposeSubmission(
+      await feedbackStore.createSubmission({
+        ...submissionInput,
+        documentId: storageDocumentId
+      }),
+      documentId
+    )
+    const storedSubmission = {
+      ...submission,
+      documentId: storageDocumentId,
+      feedback: submission.feedback.map((item) => ({
+        ...item,
+        documentId: storageDocumentId
+      }))
+    }
+    const attempt = await agentFeedbackService.dispatch({
+      storageDocumentId,
+      displayLabel: document.path ? basename(document.path) : 'Untitled drawing',
+      submission: storedSubmission,
+      mode,
+      generation
+    })
+    if (attempt.status === 'rejected') {
+      await feedbackStore.restoreSubmissionDrafts(
+        storedSubmission.id,
+        new Date().toISOString()
+      )
+    }
+    return {
+      submission,
+      attempt: { ...attempt, documentId }
+    }
+  })
+  ipcMain.handle(
+    ipcChannels.agentRetireAttempt,
+    async (_event, attemptId: unknown) => {
+      if (!agentFeedbackService || typeof attemptId !== 'string') {
+        throw new Error('Agent feedback integration is unavailable')
+      }
+      return agentFeedbackService.retireAttempt(attemptId)
+    }
+  )
   ipcMain.handle(ipcChannels.rendererReady, (event) => {
     const context = requireWindowContext(event.sender)
     context.registry.resetRendererVisibility()
@@ -503,8 +654,15 @@ const initialize = async (): Promise<void> => {
 
   recentFiles = new RecentFiles(join(app.getPath('userData'), 'recent-files.json'))
   await recentFiles.load()
-  feedbackStore = new FeedbackStore(join(app.getPath('userData'), 'feedback.json'))
+  feedbackStore = new FeedbackStore(
+    join(app.getPath('userData'), 'feedback.sqlite'),
+    join(app.getPath('userData'), 'feedback.json')
+  )
   await feedbackStore.load()
+  agentFeedbackService = new AgentFeedbackService(
+    feedbackStore,
+    broadcastAgentEvent
+  )
   dictationService = new DictationService(
     join(app.getPath('userData'), 'dictation-temp')
   )
@@ -590,7 +748,9 @@ if (!hasSingleInstanceLock) {
     for (const context of windows.values()) {
       void context.registry.close()
     }
+    agentFeedbackService?.close()
     void dictationService?.close()
+    feedbackStore?.close()
   })
 
   app.on('window-all-closed', () => {

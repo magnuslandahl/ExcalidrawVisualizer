@@ -1,5 +1,14 @@
 import type { ExcalidrawScene } from './scene'
 import type {
+  AgentDeliveryInput,
+  AgentDeliveryAttempt,
+  AgentDeliveryResult,
+  AgentDocumentState,
+  AgentEvent,
+  AgentPairingInput,
+  AgentConnectionStatus
+} from './agent-feedback'
+import type {
   FeedbackDocumentState,
   LocalFeedback,
   LocalFeedbackSubmission,
@@ -25,6 +34,13 @@ export const ipcChannels = {
   feedbackSubmitCopy: 'feedback:submit-copy',
   feedbackCopySubmission: 'feedback:copy-submission',
   feedbackResolve: 'feedback:resolve',
+  agentPair: 'agent-feedback:pair',
+  agentUnpair: 'agent-feedback:unpair',
+  agentStatus: 'agent-feedback:status',
+  agentList: 'agent-feedback:list',
+  agentDeliver: 'agent-feedback:deliver',
+  agentRetireAttempt: 'agent-feedback:retire-attempt',
+  agentEvent: 'agent-feedback:event',
   rendererReady: 'app:renderer-ready',
   documentEvent: 'document:event',
   appCommand: 'app:command'
@@ -131,8 +147,15 @@ export type DesktopApi = {
     feedbackId: string,
     updatedAt: string
   ): Promise<LocalFeedback>
+  pairAgent(input: AgentPairingInput): Promise<AgentConnectionStatus>
+  unpairAgent(): Promise<AgentConnectionStatus>
+  getAgentStatus(): Promise<AgentConnectionStatus>
+  listAgentActivity(documentId: string): Promise<AgentDocumentState>
+  deliverFeedback(input: AgentDeliveryInput): Promise<AgentDeliveryResult>
+  retireAgentAttempt(attemptId: string): Promise<AgentDeliveryAttempt>
   rendererReady(): Promise<string[]>
   getDroppedFilePath(file: File): string
   onDocumentEvent(listener: (event: DocumentEvent) => void): () => void
   onAppCommand(listener: (command: AppCommand) => void): () => void
+  onAgentEvent(listener: (event: AgentEvent) => void): () => void
 }

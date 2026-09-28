@@ -74,7 +74,7 @@ indefinite Stage 0 gates. A joined extension proves control of its own task only
 ## Diagnostic harness
 
 The project extension at
-`.github/extensions/excalidraw-visualizer-stage0/extension.mjs` joins the current
+`.github/extensions/excalidraw-visualizer-companion/extension.mjs` joins the current
 Copilot task and provides:
 
 - a diagnostic canvas with readiness, queue, capability, and event summaries;
@@ -92,6 +92,10 @@ constant-time token comparison, accepts only bounded `application/json` bodies,
 and never logs or returns the token. It is removed when that extension process
 shuts down, without deleting a replacement descriptor written by a newer
 extension generation.
+
+Stage 2 subsequently promoted this extension into the explicit-pairing
+companion while retaining the bounded diagnostic surface. See
+[the Stage 2 implementation record](AGENT-FEEDBACK-STAGE2.md).
 
 The bridge accepts only a prompt, delivery mode, and optional display label. It
 does not read drawings, invoke shell commands, approve permissions, expose task

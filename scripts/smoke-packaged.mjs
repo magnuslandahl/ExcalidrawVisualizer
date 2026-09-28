@@ -1,6 +1,14 @@
 import { Buffer } from 'node:buffer'
 import { spawn } from 'node:child_process'
-import { mkdtemp, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import {
+  mkdtemp,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  stat,
+  writeFile
+} from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
@@ -59,7 +67,9 @@ const sceneWithBackground = (viewBackgroundColor) => ({
   files: {}
 })
 
-const tempRoot = await mkdtemp(join(tmpdir(), 'excalidraw-visualizer-smoke-'))
+const tempRoot = await realpath(
+  await mkdtemp(join(tmpdir(), 'excalidraw-visualizer-smoke-'))
+)
 const scenePath = join(tempRoot, 'packaged-smoke.excalidraw')
 const secondScenePath = join(tempRoot, 'packaged-smoke-second.excalidraw')
 const profilePath = join(tempRoot, 'profile')
@@ -215,25 +225,32 @@ const readRendererState = (connection) =>
       const bounds = element.getBoundingClientRect()
       return { width: bounds.width, height: bounds.height }
     }
+    const activeEditors = [...document.querySelectorAll('.editor-slot--active')]
+    const primaryActiveEditor = activeEditors[0] ?? null
     return {
       readyState: document.readyState,
       preloadBridge: typeof window.desktop?.openPath === 'function',
-      documentName: document.querySelector('.document-identity strong')?.textContent ?? '',
-      documentPath: document.querySelector('.document-identity span')?.getAttribute('title') ?? '',
-      status: document.querySelector('.status')?.textContent?.trim() ?? '',
+      documentName:
+        primaryActiveEditor?.querySelector('.document-identity strong')?.textContent ?? '',
+      documentPath:
+        primaryActiveEditor?.querySelector('.document-identity span')?.getAttribute('title') ?? '',
+      status: primaryActiveEditor?.querySelector('.status')?.textContent?.trim() ?? '',
       tabs: [...document.querySelectorAll('.document-tab')].map((tab) => ({
         name: tab.querySelector('.document-tab__select span')?.textContent ?? '',
         selected: tab.classList.contains('document-tab--active')
       })),
       split: document.querySelector('.workspace')?.classList.contains('workspace--split') ?? false,
-      visibleEditors: [...document.querySelectorAll('.editor-slot--active')].map((editor) => ({
+      visibleEditors: activeEditors.map((editor) => ({
         shell: rect(editor.querySelector('.canvas-shell')),
         canvases: [...editor.querySelectorAll('canvas')].map(rect)
       })),
       workspace: rect(document.querySelector('.workspace')),
-      canvasShell: rect(document.querySelector('.canvas-shell')),
-      canvases: [...document.querySelectorAll('.canvas-shell canvas')].map(rect),
-      canvasBackground: document.querySelector('input[type="color"]')?.value ?? '',
+      canvasShell: rect(primaryActiveEditor?.querySelector('.canvas-shell')),
+      canvases: [
+        ...(primaryActiveEditor?.querySelectorAll('.canvas-shell canvas') ?? [])
+      ].map(rect),
+      canvasBackground:
+        primaryActiveEditor?.querySelector('input[type="color"]')?.value ?? '',
       resources: performance.getEntriesByType('resource').map((entry) => entry.name)
     }
   })()`)
@@ -275,9 +292,10 @@ try {
       state.tabs.some((tab) => tab.name === basename(secondScenePath)) &&
       state.workspace?.width > 0 &&
       state.workspace?.height > 0 &&
-      state.canvasShell?.width > 0 &&
-      state.canvasShell?.height > 0 &&
-      state.canvases.filter(
+      state.visibleEditors.length === 1 &&
+      state.visibleEditors[0].shell?.width > 0 &&
+      state.visibleEditors[0].shell?.height > 0 &&
+      state.visibleEditors[0].canvases.filter(
         (canvas) => canvas?.width > 0 && canvas?.height > 0
       ).length >= 2,
     'both launch-path tabs and non-zero canvas layers'

@@ -95,7 +95,15 @@ adopts those principles for its supported Windows and macOS packages.
 - Network navigation, popup creation, and Electron permission requests remain
   denied.
 - Local files may contain private architecture and product information. Never
-  upload, index, or transmit drawing content.
+  upload, index, or transmit drawing content automatically.
+- The only provider-delivery exception is an explicit user action after pairing
+  from the intended Copilot task. Visualizer may send the immutable feedback
+  text, target metadata, opaque document identity, readable filename, and
+  revision through the authenticated task-local loopback companion. It must not
+  send the drawing file, unrelated elements, dictation audio, local paths, or
+  any data before Queue or Send now is chosen.
+- Connection/bootstrap secrets are memory-only. Do not persist them or add a
+  plaintext fallback. Provider/app restart requires explicit re-pairing.
 
 ### Compatible files
 
@@ -161,8 +169,11 @@ execute the emitted ESM preload bundle.
   elements, points, regions, or the whole drawing. Feedback overlays are not
   Excalidraw elements and never enter saved or exported drawings.
 - Copy for agent creates an immutable local submission snapshot and copies it to
-  the clipboard. Copy again recovers a prior snapshot. Provider delivery,
-  pairing, replies, and receipts remain Stage 2 work.
+  the clipboard. Copy again recovers a prior snapshot.
+- The companion canvas issues a five-minute, one-time pairing capability from
+  the intended Copilot task. Queue and Send now create immutable SQLite-backed
+  attempts and show accepted, consumed, reply-observed, idle-after-turn,
+  rejected, unknown, and retired states without conflating them.
 - Feedback dictation is explicitly activated, editable before copying, and
   processed offline through bundled English/Swedish multilingual Whisper assets.
   Typed text survives permission denial, cancellation, silence, or engine
@@ -225,8 +236,15 @@ Each `src/main/document-controller.ts` instance owns one document:
 - owns one directory watcher and fingerprint tracker
 - emits typed document events to the renderer
 
-`src/main/feedback-store.ts` validates and atomically persists feedback drafts
-and immutable copy-submission snapshots under application-private user data.
+`src/main/feedback-store.ts` owns one private SQLite database with foreign keys,
+WAL, bounded busy handling, schema versioning, feedback drafts, immutable
+submissions, provider generations/bindings, attempts, receipts, and event
+history. It migrates the former JSON store once and never stores connection
+secrets.
+`src/main/agent-feedback-service.ts` validates one-time pairing codes, connects
+only to an exact `127.0.0.1` endpoint, maintains secrets in memory, serializes
+dispatch, polls generation-scoped receipts, and blocks queued replay after an
+unknown admission until the user explicitly retires it.
 `src/main/dictation-service.ts` serializes native Whisper jobs, validates bounded
 PCM WAV input, uses unique temporary paths, supports cancellation, limits
 process/output size, and removes completed or orphaned owned job directories.
@@ -258,6 +276,8 @@ design avoids.
 - document-scoped new/open/reload/close/save/save-as
 - active-document and dirty-state reporting
 - bounded feedback persistence/copy methods
+- task pairing, delivery, activity, unpair, and explicit unknown-attempt
+  retirement
 - bounded dictation submission and cancellation
 - renderer-ready launch-path handoff
 - document and menu command subscriptions
@@ -279,6 +299,8 @@ main handler, validation, and tests together.
 - drag and drop, commands, banners, and conflict actions
 - scene-coordinate feedback capture and overlays outside scene state
 - persisted feedback composition, history, and clipboard recovery
+- explicit task pairing, queue/send-now controls, honest receipt/reply history,
+  and no-replay recovery for unknown admission
 - explicit AudioWorklet microphone capture, PCM conversion, and editable
   transcription
 
@@ -557,15 +579,16 @@ Implemented:
 - finalized GitHub Copilot Stage 0 feasibility: explicit task-originated pairing
   is supported; global task discovery/activation/creation and seamless reverse
   startup are not exposed by the tested host
+- Stage 2 same-session Copilot delivery through the project companion:
+  one-time pairing, memory-only capabilities, generation-scoped bindings,
+  immediate/queued admission, receipts/replies, SQLite history, explicit
+  unpairing, and unknown-attempt retirement without replay
 
 Near-term plan:
 
-1. Implement Stage 2 explicit pairing and immediate/queued delivery against the
-   finalized [Stage 0 capability contract](docs/AGENT-FEEDBACK-STAGE0.md).
-   Pairing must begin in the intended Copilot task, use session-scoped reconnect,
-   and preserve honest admission/unknown/completion states. Do not treat MCP
-   notifications as proof that a conversation will start a turn, infer a task
-   from repository metadata, or silently create another SDK conversation.
+1. Exercise the Stage 2 workflow in public feedback and refine result review
+   without weakening explicit pairing or receipt semantics. Do not infer tasks
+   from repository metadata or advertise seamless reverse startup.
 2. Add Apple Developer ID signing, hardened runtime, and notarization when the
    required certificate and credentials are available.
 3. Add Windows code signing when a certificate is available.

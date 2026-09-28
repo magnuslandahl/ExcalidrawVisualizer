@@ -1,6 +1,6 @@
 {
   "name": "excalidraw-visualizer",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Offline Electron editor and live viewer for Excalidraw files",
   "main": "./out/main/index.js",
   "type": "module",

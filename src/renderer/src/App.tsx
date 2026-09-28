@@ -37,6 +37,11 @@ import type {
   FeedbackTarget,
   LocalFeedback
 } from '../../shared/feedback'
+import type {
+  AgentConnectionStatus,
+  AgentDeliveryMode,
+  AgentDocumentState
+} from '../../shared/agent-feedback'
 
 type ConflictState = {
   base: ExcalidrawScene
@@ -108,6 +113,15 @@ type RecordingSession = {
 
 const themePreferenceStorageKey = 'excalidraw-visualizer-theme'
 const defaultCanvasBackground = '#ffffff'
+const disconnectedAgentStatus: AgentConnectionStatus = {
+  paired: false,
+  readiness: 'disconnected',
+  sessionId: null,
+  generation: null,
+  blockedReason: null,
+  lastEventSequence: 0,
+  detail: null
+}
 
 const statusLabels: Record<DocumentStatus, string> = {
   'no-file': 'No file open',
@@ -261,6 +275,12 @@ function DocumentEditor({
     feedback: [],
     submissions: []
   })
+  const [agentState, setAgentState] = useState<AgentDocumentState>({
+    connection: disconnectedAgentStatus,
+    attempts: []
+  })
+  const [pairingCode, setPairingCode] = useState('')
+  const [agentBusy, setAgentBusy] = useState(false)
   const [feedbackPanelOpen, setFeedbackPanelOpen] = useState(false)
   const [feedbackError, setFeedbackError] = useState<string | null>(null)
   const [draftId, setDraftId] = useState<string>(() => crypto.randomUUID())
@@ -523,6 +543,44 @@ function DocumentEditor({
     } catch (error) {
       setStatus('save-failed')
       setDetail(messageFromError(error))
+    }
+  }, [document.id])
+
+  useEffect(() => {
+    let canceled = false
+    void window.desktop
+      .listAgentActivity(document.id)
+      .then((nextState) => {
+        if (!canceled) {
+          setAgentState(nextState)
+        }
+      })
+      .catch((error: unknown) => {
+        if (!canceled) {
+          setFeedbackError(messageFromError(error))
+        }
+      })
+    const removeListener = window.desktop.onAgentEvent((event) => {
+      if (event.type === 'connection') {
+        setAgentState((current) => ({
+          ...current,
+          connection: event.connection
+        }))
+      } else if (event.documentId === document.id) {
+        setAgentState((current) => ({
+          ...current,
+          attempts: [
+            event.attempt,
+            ...current.attempts.filter(
+              (attempt) => attempt.id !== event.attempt.id
+            )
+          ]
+        }))
+      }
+    })
+    return () => {
+      canceled = true
+      removeListener()
     }
   }, [document.id])
 
@@ -868,6 +926,119 @@ function DocumentEditor({
           submissionId
         )
         setFeedbackError('Copied the saved submission to the clipboard again.')
+      } catch (error) {
+        setFeedbackError(messageFromError(error))
+      }
+    },
+    [document.id]
+  )
+
+  const pairAgent = useCallback(async (): Promise<void> => {
+    if (!pairingCode.trim()) {
+      setFeedbackError('Paste a one-time pairing code from the intended Copilot task.')
+      return
+    }
+    setAgentBusy(true)
+    try {
+      const connection = await window.desktop.pairAgent({
+        pairingCode: pairingCode.trim()
+      })
+      setAgentState((current) => ({ ...current, connection }))
+      setPairingCode('')
+      setFeedbackError('Paired with the selected Copilot task for this app session.')
+    } catch (error) {
+      setFeedbackError(messageFromError(error))
+    } finally {
+      setAgentBusy(false)
+    }
+  }, [pairingCode])
+
+  const unpairAgent = useCallback(async (): Promise<void> => {
+    setAgentBusy(true)
+    try {
+      const connection = await window.desktop.unpairAgent()
+      setAgentState((current) => ({ ...current, connection }))
+      setFeedbackError('The Copilot task was unpaired. Pending local feedback was kept.')
+    } catch (error) {
+      setFeedbackError(messageFromError(error))
+    } finally {
+      setAgentBusy(false)
+    }
+  }, [])
+
+  const deliverFeedback = useCallback(
+    async (mode: AgentDeliveryMode): Promise<void> => {
+      const currentDraft = await persistDraft()
+      if (!currentDraft) {
+        return
+      }
+      const drafts = [
+        ...feedbackState.feedback.filter(
+          (item) => item.status === 'draft' && item.id !== currentDraft.id
+        ),
+        currentDraft
+      ].filter((item) => item.text.trim().length > 0)
+      setAgentBusy(true)
+      try {
+        const result = await window.desktop.deliverFeedback({
+          id: crypto.randomUUID(),
+          documentId: document.id,
+          feedbackIds: drafts.map((item) => item.id),
+          documentRevision: fingerprintRef.current,
+          createdAt: new Date().toISOString(),
+          mode
+        })
+        const [nextFeedback, nextAgent] = await Promise.all([
+          window.desktop.listFeedback(document.id),
+          window.desktop.listAgentActivity(document.id)
+        ])
+        setFeedbackState(nextFeedback)
+        setAgentState(nextAgent)
+        startFreshDraft()
+        setFeedbackError(
+          result.attempt.status === 'accepted'
+            ? `${mode === 'immediate' ? 'Sent' : 'Queued'} ${result.submission.feedback.length} feedback item${
+                result.submission.feedback.length === 1 ? '' : 's'
+              }. Admission is confirmed; completion is still pending.`
+            : result.attempt.detail ?? 'The delivery result is unknown.'
+        )
+      } catch (error) {
+        const refresh = await Promise.allSettled([
+          window.desktop.listFeedback(document.id),
+          window.desktop.listAgentActivity(document.id)
+        ])
+        if (refresh[0].status === 'fulfilled') {
+          setFeedbackState(refresh[0].value)
+        }
+        if (refresh[1].status === 'fulfilled') {
+          setAgentState(refresh[1].value)
+        }
+        setFeedbackError(messageFromError(error))
+      } finally {
+        setAgentBusy(false)
+      }
+    },
+    [
+      document.id,
+      feedbackState.feedback,
+      persistDraft,
+      startFreshDraft
+    ]
+  )
+
+  const retireAttempt = useCallback(
+    async (attemptId: string): Promise<void> => {
+      try {
+        const retired = await window.desktop.retireAgentAttempt(attemptId)
+        setAgentState((current) => ({
+          ...current,
+          attempts: current.attempts.map((attempt) =>
+            attempt.id === retired.id
+              ? { ...retired, documentId: document.id }
+              : attempt
+          )
+        }))
+        setFeedbackError('The unresolved attempt was retired without replay.')
       } catch (error) {
         setFeedbackError(messageFromError(error))
       }
@@ -1430,6 +1601,68 @@ function DocumentEditor({
               </button>
             </header>
 
+            <section className="agent-connection">
+              <div className="feedback-list-heading">
+                <span className="feedback-section-label">Copilot task</span>
+                <span
+                  className={`agent-readiness agent-readiness--${agentState.connection.readiness}`}
+                >
+                  {agentState.connection.paired
+                    ? agentState.connection.readiness
+                    : 'not paired'}
+                </span>
+              </div>
+              {agentState.connection.paired ? (
+                <>
+                  <p>
+                    Explicitly paired for this app session. Admission, reply, and
+                    idle receipts are shown separately.
+                  </p>
+                  {agentState.connection.blockedReason && (
+                    <p className="feedback-message">
+                      Waiting in Copilot: {agentState.connection.blockedReason}
+                    </p>
+                  )}
+                  {agentState.connection.detail && (
+                    <p className="feedback-message">
+                      {agentState.connection.detail}
+                    </p>
+                  )}
+                  <button
+                    type="button"
+                    disabled={agentBusy}
+                    onClick={() => void unpairAgent()}
+                  >
+                    Unpair
+                  </button>
+                </>
+              ) : (
+                <>
+                  <p>
+                    Open the Visualizer companion in the intended Copilot task,
+                    copy its one-time code, and paste it below.
+                  </p>
+                  <textarea
+                    value={pairingCode}
+                    rows={3}
+                    maxLength={4096}
+                    disabled={agentBusy}
+                    placeholder="evp1:…"
+                    aria-label="One-time Copilot pairing code"
+                    onChange={(event) => setPairingCode(event.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="primary-button"
+                    disabled={agentBusy || !pairingCode.trim()}
+                    onClick={() => void pairAgent()}
+                  >
+                    Pair this task
+                  </button>
+                </>
+              )}
+            </section>
+
             <section className="feedback-composer">
               <span className="feedback-section-label">Target</span>
               <div className="feedback-target-actions">
@@ -1556,10 +1789,33 @@ function DocumentEditor({
                 <button
                   type="button"
                   className="primary-button"
-                  disabled={dictationState !== 'idle'}
+                  disabled={dictationState !== 'idle' || agentBusy}
                   onClick={() => void copyFeedback()}
                 >
                   Copy for agent
+                </button>
+                <button
+                  type="button"
+                  disabled={
+                    dictationState !== 'idle' ||
+                    agentBusy ||
+                    !agentState.connection.paired
+                  }
+                  onClick={() => void deliverFeedback('enqueue')}
+                >
+                  Queue for paired task
+                </button>
+                <button
+                  type="button"
+                  className="primary-button"
+                  disabled={
+                    dictationState !== 'idle' ||
+                    agentBusy ||
+                    !agentState.connection.paired
+                  }
+                  onClick={() => void deliverFeedback('immediate')}
+                >
+                  Send now
                 </button>
               </div>
             </section>
@@ -1612,9 +1868,39 @@ function DocumentEditor({
                   </article>
                 ))
               )}
+              {agentState.attempts.length > 0 && (
+                <div className="agent-attempts">
+                  <span className="feedback-section-label">Agent delivery</span>
+                  {agentState.attempts.map((attempt) => (
+                    <article
+                      key={attempt.id}
+                      className={`agent-attempt agent-attempt--${attempt.status}`}
+                    >
+                      <div>
+                        <strong>{attempt.mode === 'immediate' ? 'Send now' : 'Queued'}</strong>
+                        <span>{attempt.status.replaceAll('-', ' ')}</span>
+                      </div>
+                      <time dateTime={attempt.updatedAt}>
+                        {new Date(attempt.updatedAt).toLocaleString()}
+                      </time>
+                      {attempt.reply && <p>{attempt.reply}</p>}
+                      {attempt.detail && <p>{attempt.detail}</p>}
+                      {(attempt.status === 'unknown' ||
+                        attempt.status === 'prepared') && (
+                        <button
+                          type="button"
+                          onClick={() => void retireAttempt(attempt.id)}
+                        >
+                          Retire without replay
+                        </button>
+                      )}
+                    </article>
+                  ))}
+                </div>
+              )}
               {feedbackState.submissions.length > 0 && (
                 <div className="feedback-history">
-                  <span className="feedback-section-label">Copy history</span>
+                  <span className="feedback-section-label">Submission history</span>
                   {feedbackState.submissions.map((submission) => (
                     <div key={submission.id}>
                       <div>
@@ -1680,6 +1966,7 @@ export function App(): React.JSX.Element {
   const commandVersionRef = useRef(0)
   const metaRef = useRef(new Map<string, EditorMeta>())
   const [tabs, setTabs] = useState<TabEntry[]>([])
+  const tabsRef = useRef<TabEntry[]>([])
   const [editorMeta, setEditorMeta] = useState<Record<string, EditorMeta>>({})
   const [activeDocuments, setActiveDocuments] = useState<
     Partial<Record<PaneId, string>>
@@ -1704,25 +1991,33 @@ export function App(): React.JSX.Element {
     null
   const split = tabs.some((tab) => tab.pane === 'secondary')
 
-  const activateDocument = useCallback(
+  const selectDocument = useCallback(
     (documentId: string | null, pane: PaneId = 'primary'): void => {
       setFocusedPane(pane)
       setActiveDocuments((current) => ({
         ...current,
         [pane]: documentId ?? undefined
       }))
-      window.desktop.setActiveDocument(documentId)
     },
     []
+  )
+
+  const activateDocument = useCallback(
+    (documentId: string | null, pane: PaneId = 'primary'): void => {
+      selectDocument(documentId, pane)
+      window.desktop.setActiveDocument(documentId)
+    },
+    [selectDocument]
   )
 
   const handleDocumentEvent = useCallback(
     (event: DocumentEvent): void => {
       if (event.type === 'activate') {
         const pane =
-          tabs.find((tab) => tab.document.id === event.documentId)?.pane ??
+          tabsRef.current.find((tab) => tab.document.id === event.documentId)
+            ?.pane ??
           focusedPane
-        activateDocument(event.documentId, pane)
+        selectDocument(event.documentId, pane)
         return
       }
 
@@ -1730,31 +2025,38 @@ export function App(): React.JSX.Element {
         event.type === 'opened' ? event.document.id : event.documentId
       const version = ++eventVersionRef.current
       const pane =
-        tabs.find((tab) => tab.document.id === documentId)?.pane ?? focusedPane
+        tabsRef.current.find((tab) => tab.document.id === documentId)?.pane ??
+        focusedPane
       setTabs((current) => {
         const existing = current.find((tab) => tab.document.id === documentId)
+        let next: TabEntry[]
         if (event.type === 'opened') {
-          const next: TabEntry = {
+          const nextTab: TabEntry = {
             document: event.document,
             event,
             eventVersion: version,
             pane: existing?.pane ?? pane
           }
-          return existing
-            ? current.map((tab) => (tab.document.id === documentId ? next : tab))
-            : [...current, next]
+          next = existing
+            ? current.map((tab) =>
+                tab.document.id === documentId ? nextTab : tab
+              )
+            : [...current, nextTab]
+        } else {
+          next = current.map((tab) =>
+            tab.document.id === documentId
+              ? { ...tab, event, eventVersion: version }
+              : tab
+          )
         }
-        return current.map((tab) =>
-          tab.document.id === documentId
-            ? { ...tab, event, eventVersion: version }
-            : tab
-        )
+        tabsRef.current = next
+        return next
       })
       if (event.type === 'opened') {
         activateDocument(documentId, pane)
       }
     },
-    [activateDocument, focusedPane, tabs]
+    [activateDocument, focusedPane, selectDocument]
   )
 
   const openPath = useCallback(async (requestedPath: string): Promise<void> => {
@@ -1904,6 +2206,7 @@ export function App(): React.JSX.Element {
       ) {
         next = next.map((tab) => ({ ...tab, pane: 'primary' }))
       }
+      tabsRef.current = next
       setTabs(next)
       const nextInPane =
         next.find(
@@ -1950,18 +2253,36 @@ export function App(): React.JSX.Element {
         tabs.filter((tab) => tab.pane === 'primary').length === 1
           ? 'primary'
           : pane
-      setTabs((current) => {
-        const next = current.map((tab) =>
-          tab.document.id === documentId
-            ? { ...tab, pane: targetPane }
-            : tab
-        )
-        return next
+      const next = tabs.map((tab) =>
+        tab.document.id === documentId
+          ? { ...tab, pane: targetPane }
+          : tab
+      )
+      tabsRef.current = next
+      setTabs(next)
+      setFocusedPane(targetPane)
+      setActiveDocuments((current) => {
+        const updated = { ...current, [targetPane]: documentId }
+        if (
+          moving.pane !== targetPane &&
+          current[moving.pane] === documentId
+        ) {
+          const replacement = tabs.find(
+            (tab) =>
+              tab.document.id !== documentId && tab.pane === moving.pane
+          )
+          if (replacement) {
+            updated[moving.pane] = replacement.document.id
+          } else {
+            delete updated[moving.pane]
+          }
+        }
+        return updated
       })
-      activateDocument(documentId, targetPane)
+      window.desktop.setActiveDocument(documentId)
       setDraggingDocumentId(null)
     },
-    [activateDocument, tabs]
+    [tabs]
   )
 
   const detachTab = useCallback(

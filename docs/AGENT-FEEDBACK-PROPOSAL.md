@@ -647,11 +647,16 @@ the local foundation only; it does not implement Stage 2 provider delivery.
 
 ### Stage 2 — Complete the Copilot feedback loop
 
-Implement explicit task-originated pairing through the verified companion,
-dispatch immediate/queued delivery, display receipts/replies/questions, recover
-session-scoped connections, and correlate agent outcomes with file revisions.
-Add batch submission and review of results. Do not advertise seamless task
-discovery or reverse startup unless a later host capability is separately proven.
+Implemented in version 0.4.0: explicit task-originated pairing through the
+verified companion, immediate/queued delivery, honest receipt/reply history,
+session-scoped recovery, and revision-labelled immutable submissions. The
+private SQLite store records generations, bindings, attempts, receipts, replies,
+and retirement state; connection capabilities remain memory-only. Unknown
+admissions block later queued work and are never replayed automatically.
+
+The implementation intentionally does not advertise seamless task discovery or
+reverse startup. A later host capability requires a separate feasibility update
+before that boundary can change.
 
 ### Stage 3 — Walkthroughs and refinement
 
