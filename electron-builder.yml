@@ -9,6 +9,11 @@ afterPack: build/after-pack.mjs
 files:
   - out/**/*
   - package.json
+extraResources:
+  - from: vendor/whisper
+    to: vendor/whisper
+  - from: build/WHISPER-NOTICES.txt
+    to: WHISPER-NOTICES.txt
 asar: true
 win:
   icon: build/icon.ico
@@ -31,6 +36,8 @@ mac:
   icon: build/icon.png
   category: public.app-category.graphics-design
   minimumSystemVersion: '13.0'
+  extendInfo:
+    NSMicrophoneUsageDescription: Excalidraw Visualizer uses the microphone only when you start local feedback dictation.
   target:
     - target: dmg
       arch:

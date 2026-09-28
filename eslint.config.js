@@ -10,7 +10,7 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    files: ['build/**/*.mjs', 'scripts/**/*.mjs'],
+    files: ['build/**/*.mjs', 'scripts/**/*.mjs', '.github/extensions/**/*.mjs'],
     languageOptions: {
       globals: {
         console: 'readonly',

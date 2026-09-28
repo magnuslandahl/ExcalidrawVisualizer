@@ -95,7 +95,15 @@ adopts those principles for its supported Windows and macOS packages.
 - Network navigation, popup creation, and Electron permission requests remain
   denied.
 - Local files may contain private architecture and product information. Never
-  upload, index, or transmit drawing content.
+  upload, index, or transmit drawing content automatically.
+- The only provider-delivery exception is an explicit user action after pairing
+  from the intended Copilot task. Visualizer may send the immutable feedback
+  text, target metadata, opaque document identity, readable filename, and
+  revision through the authenticated task-local loopback companion. It must not
+  send the drawing file, unrelated elements, dictation audio, local paths, or
+  any data before Queue or Send now is chosen.
+- Connection/bootstrap secrets are memory-only. Do not persist them or add a
+  plaintext fallback. Provider/app restart requires explicit re-pairing.
 
 ### Compatible files
 
@@ -125,7 +133,9 @@ Keep these invariants:
 - no raw `ipcRenderer`, shell, process, or filesystem object in the renderer
 - all filesystem access in the main process
 - path, extension, and payload validation in the main process
-- navigation, popups, and permission requests denied by default
+- navigation, popups, and permission requests denied by default; the only
+  permission exception is audio-only microphone capture from the trusted
+  renderer after an explicit dictation action
 - a restrictive Content Security Policy
 
 Do not weaken sandboxing to work around build problems. The preload must remain
@@ -135,16 +145,14 @@ execute the emitted ESM preload bundle.
 ## Current user experience
 
 - The welcome view opens files through a button or drag and drop.
-- Multiple drawings can remain open as tabs. Multi-selection, multi-file drop,
-  launch paths, and second-instance paths all add tabs without replacing dirty
-  work.
-- Tabs can be reordered, moved into a second side-by-side pane, or detached
-  through their context menu into another secured window.
-- Every tab remains mounted while hidden so its autosave, watcher, merge, and
-  conflict state continues independently.
-- The header shows the active tab's file, full path, save/watch status, application
-  theme selector, canvas background color picker, Open, Fit to Content, and
-  Reload.
+- Multiple mounted tabs retain independent document, viewport, undo, autosave,
+  watcher, conflict, and dirty state.
+- Tabs can be arranged in a side-by-side pane. A saved clean tab can be moved
+  into another secured application window; each window owns its own registry
+  and dirty-close guard while sharing private feedback and dictation services.
+- The application header contains theme, New, and Open controls. Each document
+  toolbar shows its file, save/watch status, comments, canvas color, Fit to
+  Content, and Reload controls.
 - Application appearance can be System, Light, or Dark and is remembered
   locally.
 - Canvas background color is document state and is saved in the
@@ -157,11 +165,25 @@ execute the emitted ESM preload bundle.
 - Errors and watcher states are visible; malformed external content never
   replaces the last valid scene.
 - Conflicts offer Keep local, Load external, and Save local as a separate file.
+- The collapsible feedback panel stores local drafts anchored to selected
+  elements, points, regions, or the whole drawing. Feedback overlays are not
+  Excalidraw elements and never enter saved or exported drawings.
+- Copy for agent creates an immutable local submission snapshot and copies it to
+  the clipboard. Copy again recovers a prior snapshot.
+- The companion canvas issues a five-minute, one-time pairing capability from
+  the intended Copilot task. Queue and Send now create immutable SQLite-backed
+  attempts and show accepted, consumed, reply-observed, idle-after-turn,
+  rejected, unknown, and retired states without conflating them.
+- Feedback dictation is explicitly activated, editable before copying, and
+  processed offline through bundled English/Swedish multilingual Whisper assets.
+  Typed text survives permission denial, cancellation, silence, or engine
+  failure.
 
-The application layout uses explicit CSS grid rows for the header, optional
-banner, and workspace. Do not return to implicit placement: when the banner is
-absent, implicit placement puts the workspace in the zero-height `auto` row and
-the Excalidraw canvas renders blank.
+The application layout uses explicit CSS grid rows for the header, tabs,
+optional global banner, and workspace. Each document pane explicitly places its
+toolbar, optional banner, and canvas. Do not return to implicit placement: when
+a banner is absent, implicit placement can put the workspace in a zero-height
+`auto` row and render the Excalidraw canvas blank.
 
 ## Architecture
 
@@ -172,11 +194,12 @@ the Excalidraw canvas renders blank.
 DIAGRAM-DESIGN-GUIDELINES.md
                           Visual language for overview and detailed architecture drawings
 TODO.md                   Current handoff queue and platform roadmap
-build/                    Application/file icons, DMG guidance, ad-hoc signing hook
+build/                    Icons, DMG guidance, signing hook, Whisper notices
 scripts/
   check-release-version  Enforces tag/package version agreement
   copy-excalidraw-assets Copies pinned local Excalidraw fonts
-  smoke-packaged         Exercises packaged tabs, split panes, watch, save, windows
+  fetch-whisper-assets   Verifies/builds ignored local speech assets
+  smoke-packaged         Exercises packaged multi-window editing and local services
 src/
   main/                   Trusted Electron and filesystem boundary
   preload/                Narrow contextBridge API
@@ -195,21 +218,36 @@ electron.vite.config.ts   Main, sandbox preload, renderer, offline font transfor
 - creates the secured `BrowserWindow`
 - registers typed IPC handlers
 - handles initial command-line paths, second-instance paths, and `open-file`
-- waits for an explicit renderer-ready handshake before delivering launch paths
-- creates additional secured windows when a tab is detached
-- guards navigation, new windows, permissions, and dirty-window quitting
+- waits for an explicit renderer-ready handshake before delivering a launch path
+- owns a document registry and dirty-state guard per secured application window
+- guards navigation, popup creation, permissions, and dirty-window quitting
 
-Each `BrowserWindow` owns one `DocumentController`. A controller owns a map of
-the documents open in that window:
+`src/main/document-registry.ts` owns document identities, canonical paths,
+visible tabs, retained controllers, and in-process Save As reservations. Opening
+an already owned canonical path focuses that document instead of duplicating it.
+For a file-backed drawing, Save As to another path creates a new controller and
+tab without moving the original feedback or dirty state. A first save gives an
+untitled document its path without changing identity.
+
+Each `src/main/document-controller.ts` instance owns one document:
 
 - validates `.excalidraw` paths
-- opens, reloads, saves, saves as, and closes documents by path
-- updates recent files
-- maintains one independent watcher per open path
-- emits path-specific document events only to its owning renderer
+- opens, reloads, and saves one scene
+- owns one directory watcher and fingerprint tracker
+- emits typed document events to the renderer
 
-Different windows may open the same path, but a single window deduplicates it
-to one tab. Save As must reject a destination already open in the same window.
+`src/main/feedback-store.ts` owns one private SQLite database with foreign keys,
+WAL, bounded busy handling, schema versioning, feedback drafts, immutable
+submissions, provider generations/bindings, attempts, receipts, and event
+history. It migrates the former JSON store once and never stores connection
+secrets.
+`src/main/agent-feedback-service.ts` validates one-time pairing codes, connects
+only to an exact `127.0.0.1` endpoint, maintains secrets in memory, serializes
+dispatch, polls generation-scoped receipts, and blocks queued replay after an
+unknown admission until the user explicitly retires it.
+`src/main/dictation-service.ts` serializes native Whisper jobs, validates bounded
+PCM WAV input, uses unique temporary paths, supports cancellation, limits
+process/output size, and removes completed or orphaned owned job directories.
 
 `src/main/atomic-write.ts` writes a temporary file in the destination directory,
 flushes it, replaces the destination, and preserves its mode when supported.
@@ -235,11 +273,13 @@ design avoids.
 
 `src/preload/index.ts` exposes only `window.desktop`, a typed API for:
 
-- open/open-path/reload/close by path
-- save/save-as
-- open a validated path in another secured application window
-- dirty-state reporting
-- renderer-ready launch-path handoff for one or more files
+- document-scoped new/open/reload/close/save/save-as
+- active-document and dirty-state reporting
+- bounded feedback persistence/copy methods
+- task pairing, delivery, activity, unpair, and explicit unknown-attempt
+  retirement
+- bounded dictation submission and cancellation
+- renderer-ready launch-path handoff
 - document and menu command subscriptions
 - safe dropped-file path retrieval
 
@@ -248,30 +288,21 @@ main handler, validation, and tests together.
 
 ### Renderer
 
-`src/renderer/src/App.tsx` owns the workspace:
-
-- tab and primary/secondary pane ordering through
-  `src/shared/workspace-state.ts`
-- active tab and focused pane routing for menus and header controls
-- drag/reorder/split behavior and the tab context menu
-- close and detach safety
-- aggregate dirty state for window-close protection
-- theme, open/drop, path handoff, banners, and commands
-
-`src/renderer/src/DocumentEditor.tsx` owns each drawing's independent lifecycle:
+`src/renderer/src/App.tsx` owns the tab manager and mounted per-document editors:
 
 - base, current, and conflict scene references
 - Excalidraw imperative API integration
 - normalized open/external scenes
 - debounced save scheduling and in-flight save reconciliation
 - viewport-preserving external updates
-- canvas color and conflict actions
-
-Keep every tab editor mounted when it is hidden. Moving a tab between panes must
-change layout only; it must not remount the editor or discard in-memory state.
-Only the visible editor in the focused pane may use
-`handleKeyboardGlobally`. Call `api.refresh()` when a hidden editor becomes
-visible or its pane dimensions change.
+- theme and canvas color controls
+- drag and drop, commands, banners, and conflict actions
+- scene-coordinate feedback capture and overlays outside scene state
+- persisted feedback composition, history, and clipboard recovery
+- explicit task pairing, queue/send-now controls, honest receipt/reply history,
+  and no-replay recovery for unknown admission
+- explicit AudioWorklet microphone capture, PCM conversion, and editable
+  transcription
 
 Use Excalidraw's `restore()` before applying imported data and
 `serializeAsJSON(..., "local")` when producing saved scene JSON.
@@ -317,12 +348,23 @@ build. The transform intentionally fails the build if the expected upstream
 shape changes or a remote fallback remains. Keep this fail-closed behavior when
 upgrading Excalidraw, and verify the resulting app with a network log.
 
+`scripts/fetch-whisper-assets.mjs` owns the speech supply chain. It downloads the
+pinned multilingual small model and Silero VAD with exact size/SHA-256 checks.
+On Windows x64 it verifies and extracts the pinned upstream archive. On macOS it
+checks out the pinned `whisper.cpp` commit and builds one static universal
+`arm64`/`x86_64` CLI with a macOS 13 deployment target. Generated assets live
+only under ignored `vendor/whisper/` and are copied outside ASAR. Never replace
+these checks with floating URLs, first-run downloads, remote dictation, or
+unverified binaries. Keep `build/WHISPER-NOTICES.txt` synchronized with upstream
+licenses.
+
 ## Development workflow
 
 Requirements:
 
 - Node.js 20.19 or newer
 - npm
+- Git and CMake for macOS dictation-helper packaging
 - Windows 10/11 for Windows package creation
 - macOS 13 Ventura or newer for macOS package creation
 
@@ -390,21 +432,26 @@ The focused Vitest suite currently covers:
 - deletion-versus-modification conflicts
 - embedded file-map merging
 - dirty-document merge behavior
-- tab path deduplication, side-pane movement, and pane collapse
+- canonical multi-document open, retained reopen, Save As identity, cancel, and
+  symlink behavior
+- feedback schema validation, atomic persistence, immutable submissions, and
+  concurrent mutation serialization
+- bounded PCM downsampling/WAV encoding and dictation request validation
 
 Use temporary directories and observable events for watcher tests. Do not add
 fixed sleeps as the assertion mechanism.
 
-The cross-platform package smoke test
-(`npm run smoke:packaged -- <app-or-executable-path>`) verifies:
+The macOS package smoke test (`npm run smoke:mac -- <app-path>`) verifies:
 
 - a real window appears
 - the sandboxed preload loads
-- two launch-path files open as tabs
-- both side-by-side editors and their canvas layers have non-zero dimensions
-- atomic external replacement reaches only its matching tab
+- a launch-path file opens
+- the workspace and both canvas layers have non-zero dimensions
+- atomic external replacement reaches the renderer
 - a renderer edit is saved through the main process
-- a tab detaches into a second secured application window
+- multiple tabs open and duplicate paths activate without duplication
+- local feedback persists, copies, and remains recoverable
+- microphone capture and bundled offline dictation produce an editable transcript
 - no renderer resource errors appear
 - no remote network request is attempted
 
@@ -515,9 +562,6 @@ Implemented:
 - SHA-256 echo and duplicate suppression
 - official Excalidraw editing UI with local fonts
 - application theme selection and arbitrary canvas background colors
-- multi-file tabs, two-pane side-by-side viewing, and tab detachment into
-  additional secured windows
-- independent per-document autosave, watcher, merge, and conflict lifecycles
 - viewport-preserving external updates
 - element/file three-way merge and explicit conflict resolution
 - focused tests, linting, strict TypeScript, Windows packaging
@@ -526,18 +570,25 @@ Implemented:
   smoke coverage
 - public CI, secret scanning, rolling releases, tagged releases, checksums
 - public repository, protected `main`, rolling `latest`, and permanent `v0.1.0`
+- per-document tabs and controllers with canonical path ownership and Save As
+  copy semantics
+- local anchored feedback drafts, atomic private persistence, clipboard
+  submissions, and copy recovery
+- bundled local English/Swedish dictation with pinned model/VAD inputs,
+  microphone-only permission, serialized native jobs, cancellation, and cleanup
+- finalized GitHub Copilot Stage 0 feasibility: explicit task-originated pairing
+  is supported; global task discovery/activation/creation and seamless reverse
+  startup are not exposed by the tested host
+- Stage 2 same-session Copilot delivery through the project companion:
+  one-time pairing, memory-only capabilities, generation-scoped bindings,
+  immediate/queued admission, receipts/replies, SQLite history, explicit
+  unpairing, and unknown-attempt retirement without replay
 
 Near-term plan:
 
-1. Follow [the agent feedback planning baseline](docs/AGENT-FEEDBACK-PROPOSAL.md),
-   starting with a same-session GitHub Copilot desktop feasibility check. The
-   proposed workflow includes multiple drawings, anchored feedback, bundled local
-   Swedish/English dictation, and automatic queue processing when ready and idle.
-   This is documentation only so far. Do not implement against an assumed desktop
-   API or treat MCP notifications as proof that a conversation will start a turn.
-   The proposal identifies future scoped policy changes for microphone capture
-   and user-submitted context; current security/offline rules still apply until
-   implementation explicitly updates and validates those boundaries.
+1. Exercise the Stage 2 workflow in public feedback and refine result review
+   without weakening explicit pairing or receipt semantics. Do not infer tasks
+   from repository metadata or advertise seamless reverse startup.
 2. Add Apple Developer ID signing, hardened runtime, and notarization when the
    required certificate and credentials are available.
 3. Add Windows code signing when a certificate is available.

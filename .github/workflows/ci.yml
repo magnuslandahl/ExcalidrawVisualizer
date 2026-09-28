@@ -70,6 +70,24 @@ jobs:
           if (-not (Test-Path -LiteralPath $archive)) {
             throw "Missing packaged application archive: $archive"
           }
+          $model = "release\win-unpacked\resources\vendor\whisper\models\ggml-small.bin"
+          $vad = "release\win-unpacked\resources\vendor\whisper\models\ggml-silero-v5.1.2.bin"
+          $whisper = Get-ChildItem `
+            "release\win-unpacked\resources\vendor\whisper\bin\windows-x64" `
+            -Recurse -File |
+            Where-Object { $_.Name -in @("whisper-cli.exe", "main.exe", "whisper.exe") } |
+            Select-Object -First 1
+          if ((Get-FileHash -Algorithm SHA256 $model).Hash.ToLowerInvariant() -ne
+              "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b") {
+            throw "Packaged Whisper model hash is invalid"
+          }
+          if ((Get-FileHash -Algorithm SHA256 $vad).Hash.ToLowerInvariant() -ne
+              "29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf") {
+            throw "Packaged VAD model hash is invalid"
+          }
+          if (-not $whisper) {
+            throw "Missing packaged whisper.cpp executable"
+          }
           npm run smoke:packaged -- $executable
 
   package_macos:
@@ -97,7 +115,7 @@ jobs:
           else
             app="release/mac/ExcalidrawVisualizer.app"
           fi
-          npm run smoke:packaged -- "$app"
+          npm run smoke:mac -- "$app"
 
       - name: Verify both macOS architectures and disk images
         run: |
@@ -111,10 +129,22 @@ jobs:
             test -f "$app/Contents/Resources/app.asar"
             file "$executable" | grep -q "$arch"
             codesign --verify --deep --strict "$app"
+            resources="$app/Contents/Resources/vendor/whisper"
+            test "$(shasum -a 256 "$resources/models/ggml-small.bin" | cut -d' ' -f1)" = \
+              "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b"
+            test "$(shasum -a 256 "$resources/models/ggml-silero-v5.1.2.bin" | cut -d' ' -f1)" = \
+              "29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf"
+            helper_arches="$(lipo -archs "$resources/bin/macos-universal/whisper-cli")"
+            grep -qw arm64 <<<"$helper_arches"
+            grep -qw x86_64 <<<"$helper_arches"
+            codesign -dv --verbose=2 "$resources/bin/macos-universal/whisper-cli" 2>&1 |
+              grep -q 'Signature=adhoc'
             /usr/libexec/PlistBuddy -c 'Print :CFBundleDocumentTypes:0:CFBundleTypeExtensions:0' \
               "$app/Contents/Info.plist" | grep -qx excalidraw
             /usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' \
               "$app/Contents/Info.plist" | grep -qx 13.0
+            /usr/libexec/PlistBuddy -c 'Print :NSMicrophoneUsageDescription' \
+              "$app/Contents/Info.plist" | grep -q 'local feedback dictation'
           done
 
           for dmg in release/*.dmg; do

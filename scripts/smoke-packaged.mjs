@@ -1,6 +1,14 @@
 import { Buffer } from 'node:buffer'
 import { spawn } from 'node:child_process'
-import { mkdtemp, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import {
+  mkdtemp,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  stat,
+  writeFile
+} from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
@@ -59,7 +67,9 @@ const sceneWithBackground = (viewBackgroundColor) => ({
   files: {}
 })
 
-const tempRoot = await mkdtemp(join(tmpdir(), 'excalidraw-visualizer-smoke-'))
+const tempRoot = await realpath(
+  await mkdtemp(join(tmpdir(), 'excalidraw-visualizer-smoke-'))
+)
 const scenePath = join(tempRoot, 'packaged-smoke.excalidraw')
 const secondScenePath = join(tempRoot, 'packaged-smoke-second.excalidraw')
 const profilePath = join(tempRoot, 'profile')
@@ -215,25 +225,41 @@ const readRendererState = (connection) =>
       const bounds = element.getBoundingClientRect()
       return { width: bounds.width, height: bounds.height }
     }
+    const activeEditors = [...document.querySelectorAll('.editor-slot--active')]
+    const targetPath = ${JSON.stringify(scenePath)}
+    const targetEditor =
+      activeEditors.find(
+        (editor) =>
+          editor.querySelector('.document-identity span')?.getAttribute('title') ===
+          targetPath
+      ) ?? activeEditors[0] ?? null
     return {
       readyState: document.readyState,
       preloadBridge: typeof window.desktop?.openPath === 'function',
-      documentName: document.querySelector('.document-identity strong')?.textContent ?? '',
-      documentPath: document.querySelector('.document-identity span')?.getAttribute('title') ?? '',
-      status: document.querySelector('.status')?.textContent?.trim() ?? '',
-      tabs: [...document.querySelectorAll('.drawing-tab')].map((tab) => ({
-        name: tab.querySelector('.tab-label')?.textContent ?? '',
-        selected: tab.getAttribute('aria-selected') === 'true'
+      documentName:
+        targetEditor?.querySelector('.document-identity strong')?.textContent ?? '',
+      documentPath:
+        targetEditor?.querySelector('.document-identity span')?.getAttribute('title') ?? '',
+      status: targetEditor?.querySelector('.status')?.textContent?.trim() ?? '',
+      tabs: [...document.querySelectorAll('.document-tab')].map((tab) => ({
+        name: tab.querySelector('.document-tab__select span')?.textContent ?? '',
+        selected: tab.classList.contains('document-tab--active')
       })),
       split: document.querySelector('.workspace')?.classList.contains('workspace--split') ?? false,
-      visibleEditors: [...document.querySelectorAll('.editor-slot--active')].map((editor) => ({
+      visibleEditors: activeEditors.map((editor) => ({
+        documentPath:
+          editor.querySelector('.document-identity span')?.getAttribute('title') ?? '',
+        canvasBackground: editor.querySelector('input[type="color"]')?.value ?? '',
         shell: rect(editor.querySelector('.canvas-shell')),
         canvases: [...editor.querySelectorAll('canvas')].map(rect)
       })),
       workspace: rect(document.querySelector('.workspace')),
-      canvasShell: rect(document.querySelector('.canvas-shell')),
-      canvases: [...document.querySelectorAll('.canvas-shell canvas')].map(rect),
-      canvasBackground: document.querySelector('input[type="color"]')?.value ?? '',
+      canvasShell: rect(targetEditor?.querySelector('.canvas-shell')),
+      canvases: [
+        ...(targetEditor?.querySelectorAll('.canvas-shell canvas') ?? [])
+      ].map(rect),
+      canvasBackground:
+        targetEditor?.querySelector('input[type="color"]')?.value ?? '',
       resources: performance.getEntriesByType('resource').map((entry) => entry.name)
     }
   })()`)
@@ -268,27 +294,31 @@ try {
     (state) =>
       state.readyState === 'complete' &&
       state.preloadBridge &&
-      state.documentName === basename(secondScenePath) &&
-      state.documentPath === secondScenePath &&
+      [scenePath, secondScenePath].includes(state.documentPath) &&
       state.tabs.length === 2 &&
       state.tabs.some((tab) => tab.name === basename(scenePath)) &&
       state.tabs.some((tab) => tab.name === basename(secondScenePath)) &&
       state.workspace?.width > 0 &&
       state.workspace?.height > 0 &&
-      state.canvasShell?.width > 0 &&
-      state.canvasShell?.height > 0 &&
-      state.canvases.filter(
+      state.visibleEditors.length === 1 &&
+      state.visibleEditors[0].shell?.width > 0 &&
+      state.visibleEditors[0].shell?.height > 0 &&
+      state.visibleEditors[0].canvases.filter(
         (canvas) => canvas?.width > 0 && canvas?.height > 0
       ).length >= 2,
     'both launch-path tabs and non-zero canvas layers'
   )
 
   await connection.evaluate(`(() => {
-    const firstTab = document.querySelector('.drawing-tab')
-    if (!(firstTab instanceof HTMLElement)) {
-      throw new Error('The first drawing tab is unavailable')
+    const targetName = ${JSON.stringify(basename(scenePath))}
+    const targetTab = [...document.querySelectorAll('.document-tab')].find(
+      (tab) =>
+        tab.querySelector('.document-tab__select span')?.textContent === targetName
+    )
+    if (!(targetTab instanceof HTMLElement)) {
+      throw new Error('The target drawing tab is unavailable')
     }
-    firstTab.dispatchEvent(new MouseEvent('contextmenu', {
+    targetTab.dispatchEvent(new MouseEvent('contextmenu', {
       bubbles: true,
       clientX: 100,
       clientY: 70
@@ -298,7 +328,7 @@ try {
     () =>
       connection.evaluate(`(() => {
         const moveButton = [...document.querySelectorAll('.tab-context-menu button')]
-          .find((button) => button.textContent?.includes('Move to Side View'))
+          .find((button) => button.textContent?.toLowerCase().includes('move to side view'))
         if (moveButton instanceof HTMLButtonElement) {
           moveButton.click()
           return true
@@ -342,7 +372,13 @@ try {
   )
 
   await connection.evaluate(`(() => {
-    const input = document.querySelector('input[type="color"]')
+    const targetPath = ${JSON.stringify(scenePath)}
+    const targetEditor = [...document.querySelectorAll('.editor-slot--active')].find(
+      (editor) =>
+        editor.querySelector('.document-identity span')?.getAttribute('title') ===
+        targetPath
+    )
+    const input = targetEditor?.querySelector('input[type="color"]')
     if (!(input instanceof HTMLInputElement)) {
       throw new Error('Canvas background input is unavailable')
     }
@@ -365,7 +401,7 @@ try {
   )
 
   await connection.evaluate(`(() => {
-    const selectedTab = document.querySelector('.drawing-tab[aria-selected="true"]')
+    const selectedTab = document.querySelector('.document-tab--active')
     if (!(selectedTab instanceof HTMLElement)) {
       throw new Error('The selected drawing tab is unavailable')
     }
@@ -379,7 +415,7 @@ try {
     () =>
       connection.evaluate(`(() => {
         const detachButton = [...document.querySelectorAll('.tab-context-menu button')]
-          .find((button) => button.textContent?.includes('Open in New Window'))
+          .find((button) => button.textContent?.toLowerCase().includes('move to new window'))
         if (detachButton instanceof HTMLButtonElement) {
           detachButton.click()
           return true

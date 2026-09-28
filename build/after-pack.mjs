@@ -17,8 +17,24 @@ export default async function adHocSignMacBundle(context) {
     context.appOutDir,
     `${context.packager.appInfo.productFilename}.app`
   )
+  const whisperPath = path.join(
+    appPath,
+    'Contents',
+    'Resources',
+    'vendor',
+    'whisper',
+    'bin',
+    'macos-universal',
+    'whisper-cli'
+  )
 
+  execFileSync('codesign', ['--force', '--sign', '-', whisperPath], {
+    stdio: 'inherit'
+  })
   execFileSync('codesign', ['--force', '--deep', '--sign', '-', appPath], {
+    stdio: 'inherit'
+  })
+  execFileSync('codesign', ['--verify', '--strict', whisperPath], {
     stdio: 'inherit'
   })
   execFileSync('codesign', ['--verify', '--deep', '--strict', appPath], {

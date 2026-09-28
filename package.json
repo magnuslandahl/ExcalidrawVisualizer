@@ -1,6 +1,6 @@
 {
   "name": "excalidraw-visualizer",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Offline Electron editor and live viewer for Excalidraw files",
   "main": "./out/main/index.js",
   "type": "module",
@@ -20,6 +20,7 @@
   },
   "scripts": {
     "prepare-assets": "node scripts/copy-excalidraw-assets.mjs",
+    "prepare-whisper": "node scripts/fetch-whisper-assets.mjs",
     "predev": "npm run prepare-assets",
     "dev": "electron-vite dev",
     "prebuild": "npm run prepare-assets",
@@ -31,11 +32,11 @@
     "test:watch": "vitest",
     "check": "npm test && npm run typecheck && npm run lint",
     "release:check-version": "node scripts/check-release-version.mjs",
-    "package": "npm run build && electron-builder --publish never",
-    "package:win": "npm run build && electron-builder --win nsis portable --publish never",
-    "package:mac": "npm run build && electron-builder --mac dmg --arm64 --x64 --publish never",
-    "package:dir": "npm run build && electron-builder --dir --publish never",
-    "package:mac:dir": "npm run build && electron-builder --mac --dir --publish never",
+    "package": "npm run prepare-whisper && npm run build && electron-builder --publish never",
+    "package:win": "npm run prepare-whisper && npm run build && electron-builder --win nsis portable --publish never",
+    "package:mac": "npm run prepare-whisper && npm run build && electron-builder --mac dmg --arm64 --x64 --publish never",
+    "package:dir": "npm run prepare-whisper && npm run build && electron-builder --dir --publish never",
+    "package:mac:dir": "npm run prepare-whisper && npm run build && electron-builder --mac --dir --publish never",
     "smoke:packaged": "node scripts/smoke-packaged.mjs",
     "smoke:mac": "node scripts/smoke-packaged.mjs"
   },

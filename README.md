@@ -49,9 +49,10 @@ The packages are currently unsigned for distribution.
 ## Features
 
 - Native open, save, save-as, reload, recent-files, drag-and-drop, and keyboard shortcuts
-- Multiple open drawings as tabs, including multi-file selection and multi-file drop
-- Drag-and-drop tab ordering and a two-pane side-by-side drawing view
-- Right-click tab detachment into another secured window for multi-monitor workflows
+- Multiple mounted document tabs with independent viewport, undo, autosave, watcher,
+  conflict, and dirty state
+- Drag a tab into a side-by-side pane, or move a saved clean tab into another secured
+  application window from its context menu
 - Launch-path handling, single-instance forwarding, and packaged `.excalidraw` association
 - Chokidar-based watching for direct writes, atomic replacement, deletion, and recreation
 - SHA-256 application-write echo suppression
@@ -63,21 +64,53 @@ The packages are currently unsigned for distribution.
 - System, light, and dark application themes with a remembered preference
 - Arbitrary canvas background colors saved as normal Excalidraw document state
 - Standard Excalidraw stroke and fill palettes whenever an element is selected
+- Local feedback drafts anchored to selected elements, points, rectangular regions, or
+  the whole drawing; overlays never enter the `.excalidraw` file
+- Persistent feedback history with clipboard submission and copy-again recovery
+- Explicit one-time pairing with the current GitHub Copilot task, with separate
+  queue/send-now delivery, admission receipts, replies, blocked state, and result history
+- Bundled offline English, Swedish, and automatic-language dictation using a pinned
+  `whisper.cpp` helper, multilingual model, and Silero VAD
 - Fully local JavaScript, CSS, worker chunks, and Excalidraw fonts
 
-## Planned agent feedback workflow
+## Local feedback and GitHub Copilot pairing
 
-The [agent feedback proposal](docs/AGENT-FEEDBACK-PROPOSAL.md) describes a future
-workflow with multiple drawings, comments anchored to diagram elements, bundled
-Swedish/English dictation, and feedback to the same GitHub Copilot desktop task.
-Queued feedback would start automatically when the agent is ready and idle;
-drafts would remain unsent. These features are not implemented. The first planned
-step is to verify the desktop app's session integration and lifecycle capabilities.
+Open **Comments** on a drawing to create feedback for selected elements, a point, a
+region, or the whole drawing. Drafts and copy history are stored in the application's
+private local data, not in the drawing. **Copy for agent** puts a revision-labelled
+text submission on the clipboard; **Copy again** recovers the same immutable snapshot.
+This local workflow works without pairing an agent.
+
+The feedback composer also supports local dictation. Choose **English**, **Svenska**,
+or **Auto language**, explicitly start recording, then stop and review the editable
+transcript. Audio is converted to bounded PCM, processed locally with VAD, and removed
+after completion, cancellation, or failure. Existing typed text is preserved when
+microphone permission or transcription fails.
+
+To deliver feedback directly to the intended GitHub Copilot task:
+
+1. Open the **Excalidraw Visualizer Companion** canvas in that Copilot task.
+2. Choose **Copy one-time pairing code**.
+3. In Visualizer, open **Comments**, paste the code under **Copilot task**, and pair.
+4. Compose feedback and choose **Queue for paired task** or **Send now**.
+
+Pairing capabilities expire after five minutes and connection secrets remain in memory
+only. Restarting either side requires explicit re-pairing. **Accepted** means Copilot
+admitted the message; consumed, reply observed, and idle-after-turn are reported
+separately and do not claim that a requested file change was correct or accepted.
+Unknown admissions are never replayed automatically and must be retired explicitly
+before later queued work can continue.
+
+Visualizer does not scan, infer, activate, or create Copilot tasks. The tested host
+exposes no supported global task discovery route, so pairing must begin inside the
+intended task. The [agent feedback proposal](docs/AGENT-FEEDBACK-PROPOSAL.md) and
+[Stage 0 capability record](docs/AGENT-FEEDBACK-STAGE0.md) document that boundary.
 
 ## Requirements
 
 - Node.js 20.19 or newer (Node.js 22.12+ is also supported by the build toolchain)
 - npm
+- Git and CMake when packaging the macOS dictation helper
 - Windows 10/11 for Windows installer creation
 - macOS 13 Ventura or newer for macOS disk-image creation
 
@@ -134,20 +167,17 @@ npm run package:win
 npm run package:mac
 ```
 
+Packaging runs `npm run prepare-whisper`, downloads approximately 489 MB of pinned model
+assets, verifies exact byte sizes and SHA-256 hashes, and either extracts the pinned
+Windows x64 helper or compiles a universal macOS helper. Generated inputs stay under the
+ignored `vendor/whisper/` directory. Packaged applications include the component license
+notices from `build/WHISPER-NOTICES.txt`.
+
 Create only an unpacked application directory:
 
 ```powershell
 npm run package:dir
 ```
-
-Exercise an unpacked package through its real preload, renderer, file watcher,
-autosave, split-view, and multi-window paths:
-
-```powershell
-npm run smoke:packaged -- release\win-unpacked\ExcalidrawVisualizer.exe
-```
-
-On macOS, pass the `.app` bundle instead.
 
 Production renderer and Electron outputs are written to `out/`. Packaged artifacts are
 written to `release/`. The builder configuration sets:
@@ -169,21 +199,17 @@ Use any of these paths:
 
 - **File > Open**, `Ctrl+O` on Windows, or `⌘O` on macOS
 - The **Open** button on the welcome screen or header
-- Select or drop one or more `.excalidraw` files
-- Launch `ExcalidrawVisualizer.exe C:\drawings\overview.excalidraw C:\drawings\details.excalidraw`
-- Launch the macOS app with `/Applications/Excalidraw\ Visualizer.app/Contents/MacOS/ExcalidrawVisualizer /drawings/overview.excalidraw`
+- Drop one or more `.excalidraw` files onto the application window
+- Launch `ExcalidrawVisualizer.exe C:\path\drawing.excalidraw`
+- Launch the macOS app with `/Applications/Excalidraw\ Visualizer.app/Contents/MacOS/ExcalidrawVisualizer /path/drawing.excalidraw`
 - Open an associated `.excalidraw` file after installing the packaged application
 
-Each drawing opens in its own tab and keeps its autosave, watcher, merge, and
-conflict state while hidden. Drag tabs to reorder them. Drop a tab on the
-right-side target, or right-click it and choose **Move to Side View**, to keep
-two drawings visible at once. Right-click and choose **Open in New Window** to
-move a drawing to another secured application window. A second application
-launch forwards all supplied drawing paths to the focused window as tabs.
-
-Closing a tab with unsaved changes or a conflict requires confirmation.
-Detaching a dirty tab saves it first; unresolved conflicts must be resolved
-before the tab can move to another window.
+A second application launch forwards its file to the existing window and focuses it.
+Opening another file creates or activates its tab without disturbing dirty state in the
+other mounted editors. For a file-backed document, **Save As** to another canonical path
+creates a separate tab and document identity; feedback remains with the original.
+Drag a tab to the side-view target to compare two drawings. Right-click a saved tab
+with no pending edits to move it into another secured application window.
 
 ## Colors and appearance
 
@@ -201,9 +227,8 @@ actions.
 
 ## External watcher behavior
 
-The main process gives every open drawing an independent watcher for its parent
-directory, so replacement-by-rename is observed as reliably as direct writes.
-Each candidate is read and fingerprinted:
+The main process watches the active file's parent directory so replacement-by-rename is
+observed as reliably as direct writes. Each candidate is read and fingerprinted:
 
 1. A fingerprint matching an application write is ignored as an echo.
 2. Duplicate filesystem events with identical content are ignored.
@@ -257,17 +282,26 @@ cleanest watcher and Git behavior.
 
 ## Offline guarantee
 
-After installation, the application does not require a development server, CDN, hosted
-Excalidraw service, or network API. Excalidraw JavaScript, styles, lazy chunks, workers,
+After installation, drawing, editing, feedback drafting, persistence, and dictation do
+not require a development server, CDN, hosted Excalidraw service, or network API.
+Excalidraw JavaScript, styles, lazy chunks, workers,
 and fonts are bundled in the application. The production build removes Excalidraw's
 upstream CDN font fallback so missing local assets fail closed instead of attempting a
-network request. The renderer denies remote window creation and navigation, Electron
-permission requests are denied, and the Content Security Policy
+network request. Optional Copilot delivery uses only an authenticated loopback
+connection to the explicitly paired task-local companion. Visualizer sends no request
+to a remote endpoint; the Copilot host may process the feedback through its configured
+service after the user chooses Queue or Send now. Only the frozen feedback text,
+target metadata, opaque document identity, readable filename, and revision are sent;
+the drawing file and dictation audio are not uploaded by Visualizer.
+
+The renderer denies remote window creation and navigation. Electron permissions are
+denied except for an audio-only microphone request from the trusted renderer after the
+user starts dictation. The Content Security Policy
 allows only application resources, data/blob media, and the localhost WebSocket used by
 the development server.
 
-The application does not add telemetry and does not intentionally perform network
-requests.
+The application does not add telemetry, update checks, or general outbound network
+access.
 
 ## Automated releases and versioning
 
@@ -275,10 +309,10 @@ GitHub Actions follows the same public-release pattern as FeedbackRecorder:
 
 - Pull requests and `main` run tests, type-checking, linting, Windows and macOS
   packaging smoke tests, and Gitleaks scans of files and Git history.
-- The packaged runtime smoke test launches the native app with two real
-  `.excalidraw` paths, checks tab and split-pane canvas dimensions, exercises a
-  path-isolated external update, application save, and detached window, and
-  rejects renderer errors or remote requests.
+- The macOS smoke test launches the packaged native app, opens real document tabs,
+  checks both canvas layers, exercises an external atomic update, application save,
+  persisted feedback, copy recovery, and bundled offline dictation, and rejects
+  renderer errors or remote requests.
 - Every push to `main` refreshes the rolling `latest` release and uploads
   fixed-name Windows and macOS downloads.
 - A semantic version tag such as `v0.2.0` publishes a permanent release whose filenames
@@ -304,12 +338,12 @@ notarization are the next macOS distribution priorities.
 
 ```text
 src/
-  main/       Multi-window lifecycle, dialogs, per-window controllers, atomic saves
+  main/       Electron lifecycle, document registry, persistence, dictation, filesystem
   preload/    Narrow typed contextBridge API
-  renderer/   Tab/split workspace and per-document Excalidraw editors
-  shared/     IPC contracts, scene/merge logic, pure workspace reducer
-tests/        Vitest unit and temporary-directory watcher integration tests
-scripts/      Asset preparation and packaged runtime smoke coverage
+  renderer/   React shell and official Excalidraw component
+  shared/     IPC contracts, scene validation, renderer-independent three-way merge
+tests/        Vitest unit and temporary-directory integration tests
+scripts/      Reproducible Excalidraw and Whisper asset preparation
 build/        Application and file-association icons
 .github/      Pull-request CI and rolling/versioned release workflows
 ```
@@ -322,7 +356,8 @@ Security boundaries:
 - no general filesystem, shell, or raw IPC API exposed to the renderer
 - filesystem paths and extensions validated in the main process
 - save payloads reparsed and validated before writing
-- remote navigation, popups, and permission requests denied
+- remote navigation and popups denied; permissions denied except explicit audio-only
+  microphone capture for local dictation
 
 ## Known limitations
 
@@ -336,6 +371,8 @@ Security boundaries:
   managed-device policy may block them.
 - macOS packages are ad-hoc signed but not Developer ID signed or notarized, so
   Gatekeeper blocks the first launch until the user explicitly approves it.
+- Local feedback can be copied for an agent, but automatic delivery, task pairing,
+  replies, and provider receipts remain planned work.
 - Linux packaging is not configured.
 
 ## License

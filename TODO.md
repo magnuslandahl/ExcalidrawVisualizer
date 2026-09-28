@@ -13,17 +13,61 @@ rolling and tagged releases.
 ## Agent feedback workflow
 
 Planning reference: [Visual feedback and agent integration](docs/AGENT-FEEDBACK-PROPOSAL.md).
-These are future features, not current application capabilities.
+Stage 2 explicit Copilot pairing and delivery are implemented. Broader provider
+adapters and walkthrough recording remain future capabilities.
 
 - [x] Record the proposed workflow and the product requirement that queued feedback
   start automatically when the agent is ready and idle; drafts remain unsent.
-- [ ] Stage 0: prove same-session GitHub Copilot desktop delivery, startup in both
-  directions, readiness, recovery, and isolation between two concurrent tasks.
-  Record supported versions/capabilities and finalize transport/storage contracts.
-- [ ] Stage 1: add document-scoped tabs, anchored comments, persisted drafts and
-  outbox, plus bundled local Swedish/English dictation on supported platforms.
-- [ ] Stage 2: complete pairing, immediate/queued delivery, replies, result review,
-  and recovery with honest receipts and no automatic replay of ambiguous sends.
+- [x] Stage 0: finalize same-session GitHub Copilot desktop feasibility, including
+  the explicit-pairing boundary where seamless startup is not exposed. Record
+  supported versions/capabilities and the transport/storage contract.
+  - [x] Record the installed app/CLI/SDK surface and add a bounded same-session
+    diagnostic extension with authenticated loopback ingress.
+  - [x] Verify extension discovery, canvas/action routing, runtime input validation,
+    authenticated status, descriptor permissions, and unauthenticated rejection.
+  - [x] Verify that a real immediate send while busy enters the steering lane and
+    arrives in the originating conversation.
+  - [x] Verify that a real queued send while busy drains automatically after the
+    active turn and correlates admission, queued delivery, turn, and result IDs.
+  - [x] Correlate queued and immediate sends while already idle and final
+    session-idle completion. Exercise clarification blocking and preserve the
+    host's permission UI without companion auto-approval.
+  - [x] Prove two simultaneous tasks use distinct session IDs, descriptors, ports,
+    tokens, queues, and self-routed messages in the same checkout.
+  - [x] Exercise provider reload/stale descriptor replacement and define
+    disconnect, sleep/wake, and restart behavior conservatively. Record global
+    task discovery/activation/creation and seamless reverse startup as unsupported
+    by the installed API; require explicit task-originated pairing.
+- [x] Stage 1: add document-scoped tabs, anchored comments, persisted drafts and
+  copy history, plus bundled local Swedish/English dictation on supported
+  platforms.
+  - [x] Add canonical path ownership, retained per-document controllers, mounted
+    tabs, independent watchers/autosave/conflicts, and Save As copy semantics.
+  - [x] Add element, point, region, and whole-drawing feedback overlays outside
+    scene state, with atomically persisted drafts and immutable copy snapshots.
+  - [x] Add copy-again recovery without claiming provider admission or delivery.
+  - [x] Pin and verify the multilingual small model, Silero VAD, Windows helper,
+    and universal macOS helper; keep generated assets ignored and outside ASAR.
+  - [x] Add audio-only permission handling, bounded PCM capture, serialized local
+    jobs, cancellation, unique temporary paths, output limits, and orphan cleanup.
+  - [x] Verify synthetic English and Swedish transcription. On the local
+    Apple-silicon package, observed cold/warm CLI latency was 7.22s/0.34s for
+    short samples; packaged runtime smoke also covers capture and transcription.
+- [x] Stage 2: implement explicit task-originated pairing, immediate/queued
+  delivery, replies, result review, and session-scoped recovery against the
+  finalized adapter contract, with honest receipts and no automatic replay of
+  ambiguous sends.
+  - [x] Add a five-minute one-time pairing capability to the task-local
+    companion, with exact loopback host checks, constant-time bearer checks,
+    generation-scoped bindings, bounded payloads, and explicit unpair.
+  - [x] Replace JSON feedback persistence with one private SQLite store and
+    migrate existing drafts/submissions while keeping connection secrets in
+    memory only.
+  - [x] Persist immutable delivery attempts before dispatch, distinguish
+    accepted/consumed/reply/idle/rejected/unknown states, and block queued
+    replay until an unknown attempt is explicitly retired.
+  - [x] Add Queue and Send now controls, task readiness/blocking state,
+    replies/results, and delivery history to the feedback panel.
 - [ ] Evaluate walkthrough recording and additional agent adapters only after the
   first complete Copilot workflow passes its acceptance gates.
 

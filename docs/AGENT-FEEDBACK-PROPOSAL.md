@@ -624,6 +624,14 @@ transactional embedded store and a local socket/named pipe; use loopback only if
 the demonstrated extension lifecycle requires it. Pin compatible dependencies and
 record packaged-platform evidence before these choices become implementation facts.
 
+The finalized [Stage 0 feasibility record](AGENT-FEEDBACK-STAGE0.md) documents
+the installed host/SDK surface, live multi-task evidence, the bounded diagnostic
+harness, and the version-1 adapter contract. The result is a constrained go:
+Stage 2 may use explicit task-originated pairing, but the tested host exposes no
+supported global task discovery/activation/creation or seamless reverse-startup
+route. The diagnostic harness remains evidence infrastructure, not application
+integration.
+
 ### Stage 1 — Document and feedback foundations
 
 Refactor into per-document controllers and state. Add tabs, point/element/region
@@ -633,11 +641,22 @@ Swedish/English dictation in this stage, including packaged execution, microphon
 permissions and cold/warm latency measurements. Speech is required before calling
 the first integrated release complete.
 
+Implementation and local verification are recorded in
+[the Stage 1 implementation record](AGENT-FEEDBACK-STAGE1.md). This completes
+the local foundation only; it does not implement Stage 2 provider delivery.
+
 ### Stage 2 — Complete the Copilot feedback loop
 
-Pair files, dispatch through the verified companion, implement immediate/queued
-delivery, display receipts/replies/questions, recover connections, and correlate
-agent outcomes with file revisions. Add batch submission and review of results.
+Implemented in version 0.4.0: explicit task-originated pairing through the
+verified companion, immediate/queued delivery, honest receipt/reply history,
+session-scoped recovery, and revision-labelled immutable submissions. The
+private SQLite store records generations, bindings, attempts, receipts, replies,
+and retirement state; connection capabilities remain memory-only. Unknown
+admissions block later queued work and are never replayed automatically.
+
+The implementation intentionally does not advertise seamless task discovery or
+reverse startup. A later host capability requires a separate feasibility update
+before that boundary can change.
 
 ### Stage 3 — Walkthroughs and refinement
 
