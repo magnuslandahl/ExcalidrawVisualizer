@@ -62,6 +62,15 @@ The packages are currently unsigned for distribution.
 - Standard Excalidraw stroke and fill palettes whenever an element is selected
 - Fully local JavaScript, CSS, worker chunks, and Excalidraw fonts
 
+## Planned agent feedback workflow
+
+The [agent feedback proposal](docs/AGENT-FEEDBACK-PROPOSAL.md) describes a future
+workflow with multiple drawings, comments anchored to diagram elements, bundled
+Swedish/English dictation, and feedback to the same GitHub Copilot desktop task.
+Queued feedback would start automatically when the agent is ready and idle;
+drafts would remain unsent. These features are not implemented. The first planned
+step is to verify the desktop app's session integration and lifecycle capabilities.
+
 ## Requirements
 
 - Node.js 20.19 or newer (Node.js 22.12+ is also supported by the build toolchain)
