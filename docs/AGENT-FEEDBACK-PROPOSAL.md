@@ -304,7 +304,8 @@ These are design names, not existing public APIs.
 | Entity | Key fields and responsibilities |
 | --- | --- |
 | Document | Stable local `documentId`, canonical path, disk fingerprint, saved revision, per-document controller |
-| Agent binding | `bindingId`, provider, host/session identity, working directory, document ID, connection state, capabilities, binding generation |
+| Session connection | Provider/host/session identity, connection generation, readiness, shared credential reference, authorized bindings and dispatch ordering state |
+| Agent binding | `bindingId`, session connection, working directory, document ID, capabilities, binding generation and document-scoped grant |
 | Feedback thread | `feedbackId`, document ID, target anchor, messages, user resolution state |
 | Anchor | Element IDs, original scene bounds/point, source revision, short text labels, optional local crop |
 | Submission | Immutable batch ID, binding generation, document revision, feedback IDs, delivery intent, order |
@@ -331,6 +332,8 @@ Host acceptance reserves the session's queued-work slot until the adapter observ
 the corresponding turn finish and confirms readiness again. A delayed working
 event or stale idle snapshot must not release the next item. Immediate steering
 and clarification replies remain distinct from advancing the automatic queue.
+This ordering state belongs to the session connection, not a comment or binding;
+deleting feedback cannot release an accepted or unresolved attempt's reservation.
 
 | State | Meaning and allowed next action |
 | --- | --- |
@@ -417,35 +420,63 @@ submissions to meet a capacity target. Capacity measurements may inform warnings
 and explicit cleanup choices; they do not silently change this retention policy.
 
 Provide **Delete local feedback** for a document, a task's document set, or all
-feedback. Preview the affected scope and include drafts, outbox items, replies,
-receipts, snapshots/crops and associated bindings. Confirm deletion of that local
-data without deleting or modifying the `.excalidraw` files. Unpair only revokes
+feedback. Preview the affected scope and include drafts, outbox payloads, replies,
+receipt details, snapshots/crops and associated bindings. Explain the minimal
+session ordering record retained below when delivery is unresolved. Confirm deletion
+of that local data without deleting or modifying the `.excalidraw` files. Unpair only revokes
 access and freezes pending work; explicitly offer local deletion separately.
 
 Serialize deletion with dispatch and dictation. Retire the affected binding
 generations and document/draft job identities (including unpaired drafts), cancel
-unsent work and local capture jobs, and make the deletion
-intent durable before removing records/assets. Ignore late callbacks from retired
-generations so they cannot recreate data or replay a deleted submission. Finish
-interrupted cleanup on startup before reconnecting or dispatching. Already sent
+unsent work and local capture jobs, and make the deletion intent durable before
+removing records/assets. Discard late content callbacks from retired bindings/jobs
+so they cannot recreate data or replay a deleted submission. Finish interrupted
+cleanup on startup before reconnecting or dispatching. Already sent
 or ambiguously sent work may still execute in Copilot; local deletion neither
 cancels that work nor erases content already received by the provider. Any later
 pairing uses a new binding generation without recovering deleted submissions.
 Deleting one document's feedback leaves other documents' bindings, jobs and history
 intact, even when they share the same agent session.
 
+For an in-flight, accepted or unknown attempt, retain only the session identity,
+opaque attempt/provider message IDs when available, and its unresolved ordering
+state. Remove feedback text, paths, targets and assets. This session-level dispatch
+barrier survives restart independently of deleted bindings. Process authenticated
+receipt/completion metadata through the current connection generation to reconcile
+it; discard late reply content rather than restoring a deleted thread. Release the
+barrier only after the adapter proves the attempt was not accepted, or its work
+finished/canceled, and verifies current readiness. A generic idle event is not proof.
+
+Pending feedback for other drawings remains stored and authenticated, but waits
+behind this barrier. If the host cannot resolve it, show **Delivery unresolved**
+with a return-to-task action where supported. An explicit **Release ordering hold**
+action may resume only after the user acknowledges that earlier work may still run;
+it must not claim completion or resend deleted content. Remove the minimal record
+after reconciliation or this explicit override. If all bindings are removed,
+disconnect and remove connection credentials; keep only the ordering record until
+explicit pairing with that session allows reconciliation. Never reconnect a deleted
+binding automatically. Include this retention exception in the deletion preview.
+
 Delete private crops/snapshots when their last owning record is removed; shared
 assets survive only while still referenced. Clean unreferenced assets and orphaned
 audio in application-owned temporary job directories on startup, after confirming
 no live job owns them. Never clean arbitrary user temporary files. Report cleanup
-failures and retry them; do not show deletion as complete while owned files remain.
+failures and retry them; do not show deletion as complete while files scheduled
+for removal remain.
 Local deletion is logical removal, not a promise of forensic erasure from disks,
 OS backups, or user-created exports.
 
 Keep persisted connection credentials in OS-backed secret storage; the feedback
-store holds only references. Remove scoped credentials on unpair/delete. If secure
-storage is unavailable, allow an explicit session-only connection without plaintext
-credential fallback or automatic restart reconnect. Stage 0 must validate this
+store holds only references. One session connection owns its shared credential;
+bindings hold separate document-scoped grants rather than credential copies.
+Unpair/delete revokes that binding's grant and removes any binding-specific secret.
+Keep the shared credential while at least one authorized binding references the
+connection; revoke and remove it when the final binding is removed. A dispatch
+barrier alone does not authorize retaining credentials. Credential rotation updates
+the shared connection reference, preserves existing document grants and rejects
+events from the old connection generation. If secure storage is unavailable,
+allow an explicit session-only connection without plaintext credential fallback
+or automatic restart reconnect. Stage 0 must validate this
 behavior for supported platforms, alongside the existing pairing/transport contract.
 
 ## 6. Multiple documents
@@ -497,8 +528,9 @@ Pairing grants access only to explicit document bindings and submitted feedback.
 Do not expose all recent files or private drafts to every connected task. Revoke
 access when unpaired, and reject expired binding generations. A file copied or
 saved under a new name does not inherit an agent binding silently.
-Unpairing freezes pending submissions and revokes the transport capability; it
-cannot retract content already sent to a host. Rebinding offers an explicit move
+Unpairing freezes pending submissions and revokes that binding's document grant;
+shared connection credentials follow the ownership rules above. It cannot retract
+content already sent to a host. Rebinding offers an explicit move
 for unsent items, producing new submissions under the new binding generation.
 Accepted or unknown attempts must first be reconciled and cannot be silently moved.
 
@@ -578,6 +610,12 @@ Keep feedback semantics independent of provider-specific session APIs.
   unpair versus local deletion, crash during cleanup, orphaned audio after failure,
   late send/transcription callbacks, secure-storage unavailability and cleanup
   errors. Deleted pending items never replay; diagram files remain unchanged.
+- Shared-session lifecycle tests: document A has an accepted/unknown send, B is
+  queued, A is deleted, then the app restarts and receives late metadata/content.
+  B stays authenticated and waits until correlated reconciliation or explicit
+  ordering override; A's content stays deleted. Also test deleting/unpairing one
+  of two bindings, final-binding credential removal, credential rotation, and
+  re-pairing after all bindings were removed while an ordering barrier remained.
 - Conflict tests: a pending autosave or manual save cannot silently write conflicting
   content; no automatic resolution of incompatible concurrent changes.
 - UI tests: comment mode does not move drawing objects, annotations track pan/zoom,
@@ -627,7 +665,7 @@ The core service needs these logical operations; stage 0 fixes their wire schema
 | Observe delivery | Submission and provider receipt; separate accepted, unknown and rejected |
 | Report reply/result | Matching binding/submission/feedback IDs; bounded reply and optional changed IDs/revision |
 | Pause/cancel/revoke | Explicit user action; distinguish unsent cancellation from host cancellation |
-| Delete local feedback | Explicit document/task/all scope; retire bindings, cancel unsent work, remove owned data/assets and credentials |
+| Delete local feedback | Explicit document/task/all scope; retire grants, cancel unsent work, remove owned data/assets; retain only unresolved ordering metadata and still-referenced shared credentials |
 | Dictate | Document, draft and job ID; bounded audio input and editable local transcript |
 
 Decision record:
@@ -635,8 +673,9 @@ Decision record:
 1. Confirm the companion-extension approach while retaining the independent app.
 2. Choose the initial target interactions: element selection, region, point, and
    whole-document feedback are recommended; freehand markup can wait.
-3. **Confirmed product requirement:** queued feedback starts automatically when the agent is ready and
-   idle. Drafts provide the deliberate hold-until-send behavior. No second Run click.
+3. **Confirmed product requirement:** queued feedback starts automatically when the
+   agent is ready and idle. Drafts provide the deliberate hold-until-send behavior.
+   No second Run click.
 4. Validate the proposed bundled Whisper small baseline and set dictation latency
    and accuracy acceptance targets. Built-in Swedish support is already decided.
 5. Decide the initial feedback context policy, including optional diagram crops.
