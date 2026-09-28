@@ -174,6 +174,10 @@ execute the emitted ESM preload bundle.
   the intended Copilot task. Queue and Send now create immutable SQLite-backed
   attempts and show accepted, consumed, reply-observed, idle-after-turn,
   rejected, unknown, and retired states without conflating them.
+- The Comments panel installs or updates the companion from a packaged,
+  immutable resource into the current user's Copilot extensions directory.
+  Installation is explicit, user-wide, and refuses to overwrite an unmanaged
+  same-named extension. A new Copilot task or restart activates changes.
 - Feedback dictation is explicitly activated, editable before copying, and
   processed offline through bundled English/Swedish multilingual Whisper assets.
   Typed text survives permission denial, cancellation, silence, or engine
@@ -245,6 +249,10 @@ secrets.
 only to an exact `127.0.0.1` endpoint, maintains secrets in memory, serializes
 dispatch, polls generation-scoped receipts, and blocks queued replay after an
 unknown admission until the user explicitly retires it.
+`src/main/copilot-companion-installer.ts` compares the fixed bundled companion
+with the user-scoped Copilot extension, installs or updates only
+Visualizer-managed copies through atomic file replacement, and never accepts a
+renderer-supplied filesystem path.
 `src/main/dictation-service.ts` serializes native Whisper jobs, validates bounded
 PCM WAV input, uses unique temporary paths, supports cancellation, limits
 process/output size, and removes completed or orphaned owned job directories.
@@ -416,6 +424,10 @@ Outputs:
 - `release/mac-arm64/` and `release/mac/` contain unpacked Apple silicon and
   Intel applications.
 - `release/*.dmg` contains the Apple silicon and Intel disk images.
+
+Packaged applications also carry the checked-in
+`.github/extensions/excalidraw-visualizer-companion` directory as an immutable
+resource for explicit user-wide installation from the Comments panel.
 
 These paths are generated and ignored.
 

@@ -40,6 +40,8 @@ export const ipcChannels = {
   agentList: 'agent-feedback:list',
   agentDeliver: 'agent-feedback:deliver',
   agentRetireAttempt: 'agent-feedback:retire-attempt',
+  companionStatus: 'copilot-companion:status',
+  companionInstall: 'copilot-companion:install',
   agentEvent: 'agent-feedback:event',
   rendererReady: 'app:renderer-ready',
   documentEvent: 'document:event',
@@ -119,6 +121,15 @@ export type SaveResult =
     }
   | { ok: false; canceled?: boolean; message?: string }
 
+export type CopilotCompanionStatus = {
+  state: 'not-installed' | 'current' | 'update-available' | 'unmanaged'
+}
+
+export type CopilotCompanionInstallResult = {
+  status: CopilotCompanionStatus
+  restartRequired: true
+}
+
 export type DesktopApi = {
   newDocument(): Promise<OpenedDocument>
   openDialog(): Promise<boolean>
@@ -153,6 +164,8 @@ export type DesktopApi = {
   listAgentActivity(documentId: string): Promise<AgentDocumentState>
   deliverFeedback(input: AgentDeliveryInput): Promise<AgentDeliveryResult>
   retireAgentAttempt(attemptId: string): Promise<AgentDeliveryAttempt>
+  getCopilotCompanionStatus(): Promise<CopilotCompanionStatus>
+  installCopilotCompanion(): Promise<CopilotCompanionInstallResult>
   rendererReady(): Promise<string[]>
   getDroppedFilePath(file: File): string
   onDocumentEvent(listener: (event: DocumentEvent) => void): () => void

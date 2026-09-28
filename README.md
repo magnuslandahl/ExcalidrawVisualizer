@@ -89,10 +89,22 @@ microphone permission or transcription fails.
 
 To deliver feedback directly to the intended GitHub Copilot task:
 
-1. Open the **Excalidraw Visualizer Companion** canvas in that Copilot task.
-2. Choose **Copy one-time pairing code**.
-3. In Visualizer, open **Comments**, paste the code under **Copilot task**, and pair.
-4. Compose feedback and choose **Queue for paired task** or **Send now**.
+1. In Visualizer, open **Comments** and choose **Install Copilot companion**.
+   Restart GitHub Copilot or open a new task after installation or an update.
+2. Open the **Excalidraw Visualizer Companion** canvas in the intended Copilot
+   task.
+3. Choose **Copy one-time pairing code**.
+4. In Visualizer, paste the code under **Copilot task** and pair.
+5. Compose feedback and choose **Queue for paired task** or **Send now**.
+
+The installer copies the companion shipped with Visualizer into the current
+user's Copilot extension directory, so it is available from every repository.
+It honors `COPILOT_HOME` when configured and otherwise uses the standard
+`.copilot` directory in the user's home directory. Visualizer updates only
+copies that it installed itself and refuses to overwrite an extension with the
+same name that is managed separately. Contributors working in this repository
+also receive the checked-in project extension automatically; that project copy
+takes precedence over the user-wide copy for this checkout.
 
 Pairing capabilities expire after five minutes and connection secrets remain in memory
 only. Restarting either side requires explicit re-pairing. **Accepted** means Copilot
@@ -187,6 +199,8 @@ written to `release/`. The builder configuration sets:
 - Windows targets: x64 NSIS installer and x64 portable executable
 - macOS targets: Apple silicon and Intel x64 DMGs for macOS 13 or newer
 - `.excalidraw` file association
+- a bundled Copilot companion that can be installed user-wide from the Comments
+  panel
 
 The current builds use a simple project icon from `build/`; it can be replaced with final
 branding without changing the package layout. Production signing and macOS notarization

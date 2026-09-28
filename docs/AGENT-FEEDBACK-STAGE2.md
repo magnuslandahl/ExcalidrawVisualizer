@@ -8,13 +8,15 @@ add task discovery, activation, creation, or seamless reverse startup.
 
 ## User workflow
 
-1. Open the **Excalidraw Visualizer Companion** canvas inside the intended
+1. Install or update the bundled companion from the drawing's Comments panel,
+   then restart GitHub Copilot or open a new task.
+2. Open the **Excalidraw Visualizer Companion** canvas inside the intended
    Copilot task.
-2. Generate a five-minute, one-time pairing code.
-3. Paste the code into the drawing's Comments panel and pair.
-4. Create one or more local feedback drafts.
-5. Choose **Queue for paired task** or **Send now**.
-6. Review admission, consumption, reply, final-idle, rejection, or unknown state
+3. Generate a five-minute, one-time pairing code.
+4. Paste the code into the drawing's Comments panel and pair.
+5. Create one or more local feedback drafts.
+6. Choose **Queue for paired task** or **Send now**.
+7. Review admission, consumption, reply, final-idle, rejection, or unknown state
    in the same panel.
 
 Clipboard submission remains available without pairing. Dictation remains
@@ -88,6 +90,27 @@ The project extension at
 The companion retains the bounded Stage 0 diagnostic endpoints and descriptor
 for feasibility regression checks. Product delivery uses only the one-time
 pairing path.
+
+## Companion distribution
+
+Production packages include the project companion as an immutable application
+resource. The Comments panel can copy or update that resource under
+`$COPILOT_HOME/extensions/excalidraw-visualizer-companion`, defaulting to the
+standard `.copilot/extensions` directory in the user's home directory. Copilot
+discovers the installed user extension in sessions for other repositories; it
+cannot execute the copy directly from the Visualizer application bundle.
+
+Installation is an explicit user action through typed IPC. The renderer cannot
+choose source or destination paths. The main process accepts only the fixed
+bundled files, writes them atomically, and recognizes ownership through
+`copilot-extension.json`. It refuses to overwrite a same-named extension that
+does not carry Visualizer's ownership marker. GitHub Copilot must be restarted
+or a new task opened after installation or an update.
+
+The checked-in project extension remains authoritative for this repository and
+shadows a user-installed copy with the same name. This lets contributors test
+the current source while the packaged application provides a one-click,
+user-wide installation for work in other repositories.
 
 ## Verification
 

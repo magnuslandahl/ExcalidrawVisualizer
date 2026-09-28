@@ -68,6 +68,8 @@ adapters and walkthrough recording remain future capabilities.
     replay until an unknown attempt is explicitly retired.
   - [x] Add Queue and Send now controls, task readiness/blocking state,
     replies/results, and delivery history to the feedback panel.
+  - [x] Bundle the companion in packaged applications and add an explicit
+    user-wide install/update action that refuses to overwrite unmanaged copies.
 - [ ] Evaluate walkthrough recording and additional agent adapters only after the
   first complete Copilot workflow passes its acceptance gates.
 

@@ -775,6 +775,19 @@ input[type="color"]:focus-visible {
   line-height: 1.4;
 }
 
+.companion-install {
+  display: grid;
+  gap: 7px;
+  padding: 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--button);
+}
+
+.agent-connection .companion-install-status {
+  color: #2f9e44;
+}
+
 .agent-connection textarea {
   width: 100%;
   resize: vertical;

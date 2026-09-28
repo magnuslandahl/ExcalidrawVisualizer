@@ -26,11 +26,12 @@ import {
 import { parseSceneText, type ExcalidrawScene } from '../../shared/scene'
 import type {
   AppCommand,
+  CopilotCompanionStatus,
+  DictationLanguage,
   DocumentEvent,
   DocumentStatus,
   OpenedDocument
 } from '../../shared/contracts'
-import type { DictationLanguage } from '../../shared/contracts'
 import type {
   FeedbackBounds,
   FeedbackDocumentState,
@@ -279,6 +280,9 @@ function DocumentEditor({
     connection: disconnectedAgentStatus,
     attempts: []
   })
+  const [companionStatus, setCompanionStatus] =
+    useState<CopilotCompanionStatus | null>(null)
+  const [companionBusy, setCompanionBusy] = useState(false)
   const [pairingCode, setPairingCode] = useState('')
   const [agentBusy, setAgentBusy] = useState(false)
   const [feedbackPanelOpen, setFeedbackPanelOpen] = useState(false)
@@ -583,6 +587,25 @@ function DocumentEditor({
       removeListener()
     }
   }, [document.id])
+
+  useEffect(() => {
+    let canceled = false
+    void window.desktop
+      .getCopilotCompanionStatus()
+      .then((status) => {
+        if (!canceled) {
+          setCompanionStatus(status)
+        }
+      })
+      .catch((error: unknown) => {
+        if (!canceled) {
+          setFeedbackError(messageFromError(error))
+        }
+      })
+    return () => {
+      canceled = true
+    }
+  }, [])
 
   const fitToContent = useCallback((): void => {
     const api = apiRef.current
@@ -952,6 +975,21 @@ function DocumentEditor({
       setAgentBusy(false)
     }
   }, [pairingCode])
+
+  const installCopilotCompanion = useCallback(async (): Promise<void> => {
+    setCompanionBusy(true)
+    try {
+      const result = await window.desktop.installCopilotCompanion()
+      setCompanionStatus(result.status)
+      setFeedbackError(
+        'Copilot companion installed. Restart GitHub Copilot or open a new task to activate it.'
+      )
+    } catch (error) {
+      setFeedbackError(messageFromError(error))
+    } finally {
+      setCompanionBusy(false)
+    }
+  }, [])
 
   const unpairAgent = useCallback(async (): Promise<void> => {
     setAgentBusy(true)
@@ -1638,6 +1676,39 @@ function DocumentEditor({
                 </>
               ) : (
                 <>
+                  {companionStatus?.state === 'current' && (
+                    <p className="companion-install-status">
+                      Companion installed for all repositories. Open a new Copilot
+                      task after an update.
+                    </p>
+                  )}
+                  {companionStatus?.state === 'unmanaged' && (
+                    <p className="feedback-message">
+                      A companion with the same name already exists in your user
+                      extensions and is not managed by Visualizer.
+                    </p>
+                  )}
+                  {(companionStatus?.state === 'not-installed' ||
+                    companionStatus?.state === 'update-available') && (
+                    <div className="companion-install">
+                      <p>
+                        {companionStatus.state === 'not-installed'
+                          ? 'Install the bundled companion once to make it available in every repository.'
+                          : 'A newer bundled companion is available.'}
+                      </p>
+                      <button
+                        type="button"
+                        disabled={companionBusy}
+                        onClick={() => void installCopilotCompanion()}
+                      >
+                        {companionBusy
+                          ? 'Installing…'
+                          : companionStatus.state === 'not-installed'
+                            ? 'Install Copilot companion'
+                            : 'Update Copilot companion'}
+                      </button>
+                    </div>
+                  )}
                   <p>
                     Open the Visualizer companion in the intended Copilot task,
                     copy its one-time code, and paste it below.

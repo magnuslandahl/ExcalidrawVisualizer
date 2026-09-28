@@ -1,7 +1,8 @@
-import { basename, join } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import { app, BrowserWindow, clipboard, dialog, ipcMain, session } from 'electron'
 import { DictationService } from './dictation-service'
 import { AgentFeedbackService } from './agent-feedback-service'
+import { CopilotCompanionInstaller } from './copilot-companion-installer'
 import { DocumentRegistry } from './document-registry'
 import { FeedbackStore } from './feedback-store'
 import { feedbackDocumentStorageKey } from './feedback-document'
@@ -42,6 +43,7 @@ const agentDocumentRoutes = new Map<string, Map<number, string>>()
 const pendingLaunchPaths: string[] = []
 let feedbackStore: FeedbackStore | undefined
 let agentFeedbackService: AgentFeedbackService | undefined
+let copilotCompanionInstaller: CopilotCompanionInstaller | undefined
 let dictationService: DictationService | undefined
 let recentFiles: RecentFiles | undefined
 
@@ -617,6 +619,18 @@ const registerIpc = (): void => {
       return agentFeedbackService.retireAttempt(attemptId)
     }
   )
+  ipcMain.handle(ipcChannels.companionStatus, () => {
+    if (!copilotCompanionInstaller) {
+      throw new Error('The Copilot companion installer is unavailable')
+    }
+    return copilotCompanionInstaller.getStatus()
+  })
+  ipcMain.handle(ipcChannels.companionInstall, () => {
+    if (!copilotCompanionInstaller) {
+      throw new Error('The Copilot companion installer is unavailable')
+    }
+    return copilotCompanionInstaller.install()
+  })
   ipcMain.handle(ipcChannels.rendererReady, (event) => {
     const context = requireWindowContext(event.sender)
     context.registry.resetRendererVisibility()
@@ -662,6 +676,25 @@ const initialize = async (): Promise<void> => {
   agentFeedbackService = new AgentFeedbackService(
     feedbackStore,
     broadcastAgentEvent
+  )
+  const companionSourceDirectory = app.isPackaged
+    ? join(
+        process.resourcesPath,
+        'copilot-extension',
+        'excalidraw-visualizer-companion'
+      )
+    : resolve(
+        app.getAppPath(),
+        '.github',
+        'extensions',
+        'excalidraw-visualizer-companion'
+      )
+  const copilotHome = process.env.COPILOT_HOME
+    ? resolve(process.env.COPILOT_HOME)
+    : join(app.getPath('home'), '.copilot')
+  copilotCompanionInstaller = new CopilotCompanionInstaller(
+    companionSourceDirectory,
+    copilotHome
   )
   dictationService = new DictationService(
     join(app.getPath('userData'), 'dictation-temp')

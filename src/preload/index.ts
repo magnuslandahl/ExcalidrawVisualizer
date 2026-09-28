@@ -101,6 +101,14 @@ const api: DesktopApi = {
       ipcChannels.agentRetireAttempt,
       attemptId
     ) as ReturnType<DesktopApi['retireAgentAttempt']>,
+  getCopilotCompanionStatus: () =>
+    ipcRenderer.invoke(ipcChannels.companionStatus) as ReturnType<
+      DesktopApi['getCopilotCompanionStatus']
+    >,
+  installCopilotCompanion: () =>
+    ipcRenderer.invoke(ipcChannels.companionInstall) as ReturnType<
+      DesktopApi['installCopilotCompanion']
+    >,
   rendererReady: () =>
     ipcRenderer.invoke(ipcChannels.rendererReady) as Promise<string[]>,
   getDroppedFilePath: (file) => webUtils.getPathForFile(file),

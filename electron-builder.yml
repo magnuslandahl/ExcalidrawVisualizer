@@ -10,6 +10,8 @@ files:
   - out/**/*
   - package.json
 extraResources:
+  - from: .github/extensions/excalidraw-visualizer-companion
+    to: copilot-extension/excalidraw-visualizer-companion
   - from: vendor/whisper
     to: vendor/whisper
   - from: build/WHISPER-NOTICES.txt
