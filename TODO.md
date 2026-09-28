@@ -10,6 +10,23 @@ on Apple silicon and Intel are now packaged and advertised. The permanent
 `v0.1.0` release predates macOS packaging; macOS downloads begin with the next
 rolling and tagged releases.
 
+## Agent feedback workflow
+
+Planning reference: [Visual feedback and agent integration](docs/AGENT-FEEDBACK-PROPOSAL.md).
+These are future features, not current application capabilities.
+
+- [x] Record the proposed workflow and the product requirement that queued feedback
+  start automatically when the agent is ready and idle; drafts remain unsent.
+- [ ] Stage 0: prove same-session GitHub Copilot desktop delivery, startup in both
+  directions, readiness, recovery, and isolation between two concurrent tasks.
+  Record supported versions/capabilities and finalize transport/storage contracts.
+- [ ] Stage 1: add document-scoped tabs, anchored comments, persisted drafts and
+  outbox, plus bundled local Swedish/English dictation on supported platforms.
+- [ ] Stage 2: complete pairing, immediate/queued delivery, replies, result review,
+  and recovery with honest receipts and no automatic replay of ambiguous sends.
+- [ ] Evaluate walkthrough recording and additional agent adapters only after the
+  first complete Copilot workflow passes its acceptance gates.
+
 ## macOS support
 
 macOS packaging is implemented. Electron 44 sets the baseline at macOS 13
