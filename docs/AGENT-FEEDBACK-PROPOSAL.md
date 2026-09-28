@@ -425,6 +425,8 @@ receipt details, snapshots/crops and associated bindings. Explain the minimal
 session ordering record retained below when delivery is unresolved. Confirm deletion
 of that local data without deleting or modifying the `.excalidraw` files. Unpair only revokes
 access and freezes pending work; explicitly offer local deletion separately.
+The deletion preview must also say that the affected drawings will be disconnected
+from their agent. Deletion includes unpairing; unpairing alone keeps local history.
 
 Serialize deletion with dispatch and dictation. Retire the affected binding
 generations and document/draft job identities (including unpaired drafts), cancel
@@ -479,17 +481,69 @@ allow an explicit session-only connection without plaintext credential fallback
 or automatic restart reconnect. Stage 0 must validate this
 behavior for supported platforms, alongside the existing pairing/transport contract.
 
+Use one binding-retirement procedure for unpair and deletion, serialized with
+session dispatch and provider-event ingestion. Before retiring a grant, persist
+an unresolved session barrier for any dispatching attempt, including its opaque
+correlation ID. Receipt metadata that arrives before retirement updates that state
+in the same serialization order. After grant retirement, only authenticated metadata
+for a matching attempt on a current session connection may reconcile the barrier;
+retired bindings never regain access to content. If the last connection is closed,
+reject its late events and reconcile through a newly authorized connection later.
+An in-flight attempt must not become an unsent, movable or retryable item merely
+because the user unpaired. Unsent items freeze; accepted/unknown items and barriers
+retain their existing recovery rules. Sibling bindings keep their grants.
+
+Credentials here mean bridge-owned connection capabilities, not Copilot account
+credentials. When the final grant is retired, atomically mark its connection and
+credential reference **Revocation pending** before external cleanup. It cannot be
+used for dispatch, ordinary reconnect, or a new binding. Track required issuer
+revocation and OS-secret removal as separate durable steps; persist each result
+and retry failures idempotently after restart. If issuer revocation needs the old
+secret, retain it solely for that cleanup until revocation is confirmed, then
+remove it. Do not claim cleanup complete until all required steps finish; show
+failures while local grants remain revoked. Resolve races with new bindings under
+the same ownership transaction: they must wait for cleanup or use a fresh capability
+and generation, never reuse the retiring credential. A remaining sibling grant
+prevents shared-credential retirement. Stage 0 defines which revocation operations
+the bridge/host actually requires and demonstrates their failure/recovery behavior.
+
 ## 6. Multiple documents
 
 Introduce a document registry and one document controller per open file. Keep
 watcher, path, fingerprint state, save pipeline, conflict state, dirty state,
 feedback, agent binding, and viewport scoped to `documentId`.
 
-All IPC commands and events must include document identity. Save callbacks must
+All document-scoped IPC commands, callbacks and events must include document
+identity. Application-wide messages such as renderer readiness and opening a file
+picker do not need a fictitious document ID. A menu action such as Save or Fit to
+Content captures its target when invoked. Save callbacks must
 retain the originating document even if the user switches tabs while a dialog,
 write, or agent request is outstanding. Do not route a save by the currently
 selected tab. Canonicalize paths, including platform case and symlink policy, to
 avoid opening the same physical document twice accidentally.
+
+### Save As and document identity
+
+For a file-backed document, Save As to a different canonical path creates a new,
+unbound `documentId` and opens the saved copy in a new tab after a successful atomic
+write. The original controller, watcher, feedback, drafts, binding and queued or
+in-flight submissions stay with the original path; neither content nor permissions
+are silently transferred. Saving the copy does not mark unsaved original edits as
+saved. The UI makes both destinations visible. Save As to the same canonical path
+uses ordinary Save and retains the existing identity. A first save of an untitled,
+unbound document assigns its path to that document rather than creating a copy.
+
+Reserve and validate the destination through the main-process document registry
+for the duration of the save. If another document already owns that canonical
+path, including a closed document retained for feedback or a binding, do not
+overwrite or create a second controller. Offer to open/focus that document or
+choose another destination. Aliases under the platform's case/symlink policy count
+as the same path. A pre-existing unregistered file still requires normal overwrite
+confirmation. Cancellation or write failure leaves identities and bindings intact.
+Completion uses the captured source and destination identities even after a tab
+switch; it never assigns the new path to whichever tab happens to be active.
+
+### Tab and application lifecycle
 
 Use tabs initially, optionally followed by separate windows. Background tabs keep
 watching and preserve their state. Mounting policies must balance memory use with
@@ -616,6 +670,14 @@ Keep feedback semantics independent of provider-specific session APIs.
   ordering override; A's content stays deleted. Also test deleting/unpairing one
   of two bindings, final-binding credential removal, credential rotation, and
   re-pairing after all bindings were removed while an ordering barrier remained.
+- Retirement tests: unpair a non-final/final binding while its provider call is
+  dispatching; receive acceptance/rejection before retirement, afterward, or after
+  restart. Test issuer-revocation and OS-secret deletion failures, crashes between
+  cleanup steps, new-binding races, and preservation of sibling credentials.
+- Save As tests: original drafts and queued/in-flight feedback, first untitled
+  save, same-path save, tab switching, cancellation/failure, occupied destinations,
+  concurrent destination claims, and case/symlink aliases. Only a successful copy
+  creates a new unbound document; the original's feedback never changes destination.
 - Conflict tests: a pending autosave or manual save cannot silently write conflicting
   content; no automatic resolution of incompatible concurrent changes.
 - UI tests: comment mode does not move drawing objects, annotations track pan/zoom,
@@ -664,8 +726,8 @@ The core service needs these logical operations; stage 0 fixes their wire schema
 | Submit feedback | Document, frozen batch, revision and intent; durable local receipt before any host send |
 | Observe delivery | Submission and provider receipt; separate accepted, unknown and rejected |
 | Report reply/result | Matching binding/submission/feedback IDs; bounded reply and optional changed IDs/revision |
-| Pause/cancel/revoke | Explicit user action; distinguish unsent cancellation from host cancellation |
-| Delete local feedback | Explicit document/task/all scope; retire grants, cancel unsent work, remove owned data/assets; retain only unresolved ordering metadata and still-referenced shared credentials |
+| Pause/cancel/revoke | Explicit user action; shared retirement procedure, durable cleanup state, and distinction between unsent cancellation and host cancellation |
+| Delete local feedback | Explicit document/task/all scope; retire grants, cancel unsent work, remove owned data/assets; retain unresolved ordering metadata and credentials only for live bindings or pending revocation cleanup |
 | Dictate | Document, draft and job ID; bounded audio input and editable local transcript |
 
 Decision record:
