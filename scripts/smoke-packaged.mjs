@@ -226,31 +226,40 @@ const readRendererState = (connection) =>
       return { width: bounds.width, height: bounds.height }
     }
     const activeEditors = [...document.querySelectorAll('.editor-slot--active')]
-    const primaryActiveEditor = activeEditors[0] ?? null
+    const targetPath = ${JSON.stringify(scenePath)}
+    const targetEditor =
+      activeEditors.find(
+        (editor) =>
+          editor.querySelector('.document-identity span')?.getAttribute('title') ===
+          targetPath
+      ) ?? activeEditors[0] ?? null
     return {
       readyState: document.readyState,
       preloadBridge: typeof window.desktop?.openPath === 'function',
       documentName:
-        primaryActiveEditor?.querySelector('.document-identity strong')?.textContent ?? '',
+        targetEditor?.querySelector('.document-identity strong')?.textContent ?? '',
       documentPath:
-        primaryActiveEditor?.querySelector('.document-identity span')?.getAttribute('title') ?? '',
-      status: primaryActiveEditor?.querySelector('.status')?.textContent?.trim() ?? '',
+        targetEditor?.querySelector('.document-identity span')?.getAttribute('title') ?? '',
+      status: targetEditor?.querySelector('.status')?.textContent?.trim() ?? '',
       tabs: [...document.querySelectorAll('.document-tab')].map((tab) => ({
         name: tab.querySelector('.document-tab__select span')?.textContent ?? '',
         selected: tab.classList.contains('document-tab--active')
       })),
       split: document.querySelector('.workspace')?.classList.contains('workspace--split') ?? false,
       visibleEditors: activeEditors.map((editor) => ({
+        documentPath:
+          editor.querySelector('.document-identity span')?.getAttribute('title') ?? '',
+        canvasBackground: editor.querySelector('input[type="color"]')?.value ?? '',
         shell: rect(editor.querySelector('.canvas-shell')),
         canvases: [...editor.querySelectorAll('canvas')].map(rect)
       })),
       workspace: rect(document.querySelector('.workspace')),
-      canvasShell: rect(primaryActiveEditor?.querySelector('.canvas-shell')),
+      canvasShell: rect(targetEditor?.querySelector('.canvas-shell')),
       canvases: [
-        ...(primaryActiveEditor?.querySelectorAll('.canvas-shell canvas') ?? [])
+        ...(targetEditor?.querySelectorAll('.canvas-shell canvas') ?? [])
       ].map(rect),
       canvasBackground:
-        primaryActiveEditor?.querySelector('input[type="color"]')?.value ?? '',
+        targetEditor?.querySelector('input[type="color"]')?.value ?? '',
       resources: performance.getEntriesByType('resource').map((entry) => entry.name)
     }
   })()`)
@@ -285,8 +294,7 @@ try {
     (state) =>
       state.readyState === 'complete' &&
       state.preloadBridge &&
-      state.documentName === basename(secondScenePath) &&
-      state.documentPath === secondScenePath &&
+      [scenePath, secondScenePath].includes(state.documentPath) &&
       state.tabs.length === 2 &&
       state.tabs.some((tab) => tab.name === basename(scenePath)) &&
       state.tabs.some((tab) => tab.name === basename(secondScenePath)) &&
@@ -302,11 +310,15 @@ try {
   )
 
   await connection.evaluate(`(() => {
-    const firstTab = document.querySelector('.document-tab')
-    if (!(firstTab instanceof HTMLElement)) {
-      throw new Error('The first drawing tab is unavailable')
+    const targetName = ${JSON.stringify(basename(scenePath))}
+    const targetTab = [...document.querySelectorAll('.document-tab')].find(
+      (tab) =>
+        tab.querySelector('.document-tab__select span')?.textContent === targetName
+    )
+    if (!(targetTab instanceof HTMLElement)) {
+      throw new Error('The target drawing tab is unavailable')
     }
-    firstTab.dispatchEvent(new MouseEvent('contextmenu', {
+    targetTab.dispatchEvent(new MouseEvent('contextmenu', {
       bubbles: true,
       clientX: 100,
       clientY: 70
@@ -360,7 +372,13 @@ try {
   )
 
   await connection.evaluate(`(() => {
-    const input = document.querySelector('input[type="color"]')
+    const targetPath = ${JSON.stringify(scenePath)}
+    const targetEditor = [...document.querySelectorAll('.editor-slot--active')].find(
+      (editor) =>
+        editor.querySelector('.document-identity span')?.getAttribute('title') ===
+        targetPath
+    )
+    const input = targetEditor?.querySelector('input[type="color"]')
     if (!(input instanceof HTMLInputElement)) {
       throw new Error('Canvas background input is unavailable')
     }
