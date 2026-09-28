@@ -105,15 +105,17 @@ const findWindowsTar = () => {
 const installWindowsBinary = async () => {
   const archive = join(vendorRoot, 'cache', `whisper-bin-${whisperTag}-x64.zip`)
   const destination = join(vendorRoot, 'bin', 'windows-x64')
-  const temporary = await mkdtemp(join(tmpdir(), 'excalidraw-whisper-windows-'))
+  await mkdir(dirname(destination), { recursive: true })
+  const temporary = await mkdtemp(
+    join(dirname(destination), '.windows-x64-install-')
+  )
   try {
     await download({ ...assets.windows, path: archive })
     await execFileAsync(findWindowsTar(), ['-xf', archive, '-C', temporary])
+    await stat(join(temporary, 'Release', 'whisper-cli.exe'))
+    await stat(join(temporary, 'Release', 'whisper.dll'))
     await rm(destination, { recursive: true, force: true })
-    await mkdir(dirname(destination), { recursive: true })
     await rename(temporary, destination)
-    await stat(join(destination, 'Release', 'whisper-cli.exe'))
-    await stat(join(destination, 'Release', 'whisper.dll'))
   } finally {
     await rm(temporary, { recursive: true, force: true })
     await rm(archive, { force: true })
