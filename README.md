@@ -85,9 +85,10 @@ microphone permission or transcription fails.
 
 The [agent feedback proposal](docs/AGENT-FEEDBACK-PROPOSAL.md) describes the remaining
 same-session GitHub Copilot desktop integration. Automatic immediate/queued delivery,
-pairing, replies, and result review are not shipped yet. The current joined-extension
-API also has no proven global task activation/creation route, so seamless startup in
-both directions remains a documented Stage 0 blocker rather than an advertised feature.
+pairing, replies, and result review are not shipped yet. Stage 0 feasibility is
+finalized for explicit pairing initiated inside the intended Copilot task. The tested
+host exposes no supported global task discovery/activation/creation route, so seamless
+reverse startup is an explicit limitation rather than an advertised feature.
 
 ## Requirements
 

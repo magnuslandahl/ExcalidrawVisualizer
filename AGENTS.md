@@ -550,24 +550,24 @@ Implemented:
   submissions, and copy recovery
 - bundled local English/Swedish dictation with pinned model/VAD inputs,
   microphone-only permission, serialized native jobs, cancellation, and cleanup
+- finalized GitHub Copilot Stage 0 feasibility: explicit task-originated pairing
+  is supported; global task discovery/activation/creation and seamless reverse
+  startup are not exposed by the tested host
 
 Near-term plan:
 
-1. Complete the remaining
-   [Stage 0 feasibility gates](docs/AGENT-FEEDBACK-STAGE0.md) for idle delivery,
-   blocked states, lifecycle recovery, and seamless startup. The installed
-   joined-session API still exposes no supported global task listing,
-   activation, or creation route.
-2. Implement Stage 2 pairing and immediate/queued delivery only against the
-   verified capability contract. Do not treat MCP notifications as proof that a
-   conversation will start a turn, and do not silently create another SDK
-   conversation.
-3. Add Apple Developer ID signing, hardened runtime, and notarization when the
+1. Implement Stage 2 explicit pairing and immediate/queued delivery against the
+   finalized [Stage 0 capability contract](docs/AGENT-FEEDBACK-STAGE0.md).
+   Pairing must begin in the intended Copilot task, use session-scoped reconnect,
+   and preserve honest admission/unknown/completion states. Do not treat MCP
+   notifications as proof that a conversation will start a turn, infer a task
+   from repository metadata, or silently create another SDK conversation.
+2. Add Apple Developer ID signing, hardened runtime, and notarization when the
    required certificate and credentials are available.
-4. Add Windows code signing when a certificate is available.
-5. Replace placeholder application/file icons with final original artwork.
-6. Add privacy-safe screenshots after final branding is available.
-7. Gather public feedback before expanding the merge model further.
+3. Add Windows code signing when a certificate is available.
+4. Replace placeholder application/file icons with final original artwork.
+5. Add privacy-safe screenshots after final branding is available.
+6. Gather public feedback before expanding the merge model further.
 
 Possible later work, not current commitments:
 

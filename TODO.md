@@ -18,9 +18,9 @@ future capabilities.
 
 - [x] Record the proposed workflow and the product requirement that queued feedback
   start automatically when the agent is ready and idle; drafts remain unsent.
-- [ ] Stage 0: prove same-session GitHub Copilot desktop delivery, startup in both
-  directions, readiness, recovery, and isolation between two concurrent tasks.
-  Record supported versions/capabilities and finalize transport/storage contracts.
+- [x] Stage 0: finalize same-session GitHub Copilot desktop feasibility, including
+  the explicit-pairing boundary where seamless startup is not exposed. Record
+  supported versions/capabilities and the transport/storage contract.
   - [x] Record the installed app/CLI/SDK surface and add a bounded same-session
     diagnostic extension with authenticated loopback ingress.
   - [x] Verify extension discovery, canvas/action routing, runtime input validation,
@@ -29,12 +29,15 @@ future capabilities.
     arrives in the originating conversation.
   - [x] Verify that a real queued send while busy drains automatically after the
     active turn and correlates admission, queued delivery, turn, and result IDs.
-  - [ ] Correlate queued and immediate sends while already idle, final session-idle
-    completion, and permission and clarification blocks.
+  - [x] Correlate queued and immediate sends while already idle and final
+    session-idle completion. Exercise clarification blocking and preserve the
+    host's permission UI without companion auto-approval.
   - [x] Prove two simultaneous tasks use distinct session IDs, descriptors, ports,
     tokens, queues, and self-routed messages in the same checkout.
-  - [ ] Complete reload, restart, sleep/wake, stale-generation, and
-    startup-in-both-directions checks.
+  - [x] Exercise provider reload/stale descriptor replacement and define
+    disconnect, sleep/wake, and restart behavior conservatively. Record global
+    task discovery/activation/creation and seamless reverse startup as unsupported
+    by the installed API; require explicit task-originated pairing.
 - [x] Stage 1: add document-scoped tabs, anchored comments, persisted drafts and
   copy history, plus bundled local Swedish/English dictation on supported
   platforms.
@@ -50,8 +53,10 @@ future capabilities.
   - [x] Verify synthetic English and Swedish transcription. On the local
     Apple-silicon package, observed cold/warm CLI latency was 7.22s/0.34s for
     short samples; packaged runtime smoke also covers capture and transcription.
-- [ ] Stage 2: complete pairing, immediate/queued delivery, replies, result review,
-  and recovery with honest receipts and no automatic replay of ambiguous sends.
+- [ ] Stage 2: implement explicit task-originated pairing, immediate/queued
+  delivery, replies, result review, and session-scoped recovery against the
+  finalized adapter contract, with honest receipts and no automatic replay of
+  ambiguous sends.
 - [ ] Evaluate walkthrough recording and additional agent adapters only after the
   first complete Copilot workflow passes its acceptance gates.
 

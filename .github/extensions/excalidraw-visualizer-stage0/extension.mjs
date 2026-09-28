@@ -17,9 +17,11 @@ const MAX_BODY_BYTES = 16 * 1024;
 const MAX_PROMPT_LENGTH = 4_000;
 const MAX_DISPLAY_PROMPT_LENGTH = 240;
 const PROTOCOL_VERSION = 1;
+const connectionGeneration = randomBytes(16).toString("hex");
 const canvasServers = new Map();
 const recentEvents = [];
 const admittedMessages = [];
+let eventSequence = 0;
 
 let session;
 let bridge;
@@ -36,7 +38,8 @@ const runtimeState = {
 
 function recordEvent(type, timestamp = new Date().toISOString()) {
   runtimeState.lastEventAt = timestamp;
-  recentEvents.push({ type, timestamp });
+  eventSequence += 1;
+  recentEvents.push({ sequence: eventSequence, type, timestamp });
   if (recentEvents.length > 20) {
     recentEvents.shift();
   }
@@ -77,7 +80,12 @@ function updateRuntimeState(event) {
     case "assistant.turn_end":
       if (!event.agentId) {
         for (const admitted of admittedMessages) {
-          if (admitted.turnId === event.data.turnId) {
+          if (
+            admitted.turnId === event.data.turnId &&
+            admitted.consumedAt &&
+            !admitted.turnEndedAt &&
+            event.timestamp >= admitted.consumedAt
+          ) {
             admitted.turnEndedAt = event.timestamp;
           }
         }
@@ -190,6 +198,7 @@ async function submitMessage(input) {
   const messageId = await session.send(submission);
   const admittedAt = new Date().toISOString();
   admittedMessages.push({
+    connectionGeneration,
     messageId,
     mode: submission.mode,
     admittedAt,
@@ -224,6 +233,7 @@ async function getStatus() {
 
   return {
     protocolVersion: PROTOCOL_VERSION,
+    connectionGeneration,
     sessionId: session.sessionId,
     workspaceAvailable: Boolean(session.workspacePath),
     capabilities: session.capabilities,
@@ -231,6 +241,7 @@ async function getStatus() {
     blockedReason: runtimeState.blockedReason,
     activeTurnId: runtimeState.activeTurnId,
     lastEventAt: runtimeState.lastEventAt,
+    lastEventSequence: eventSequence,
     queue: queue
       ? {
           itemCount: queue.items.length,
@@ -397,6 +408,7 @@ function renderCanvasHtml(instanceId, canvasToken) {
       <div class="grid">
         <span class="label">Instance</span><code>${instanceId}</code>
         <span class="label">Session</span><code id="session-id">Loading…</code>
+        <span class="label">Generation</span><code id="generation">Loading…</code>
         <span class="label">Readiness</span><strong id="readiness">Loading…</strong>
         <span class="label">Queued</span><span id="queued">Loading…</span>
         <span class="label">Last event</span><span id="last-event">Loading…</span>
@@ -436,6 +448,8 @@ function renderCanvasHtml(instanceId, canvasToken) {
         try {
           const status = await readResponse(await fetch("/api/status", { headers }));
           document.querySelector("#session-id").textContent = status.sessionId;
+          document.querySelector("#generation").textContent =
+            status.connectionGeneration;
           document.querySelector("#readiness").textContent = status.readiness;
           document.querySelector("#queued").textContent =
             status.queue ? String(status.queue.itemCount) : "Unavailable";
@@ -652,6 +666,7 @@ async function startBridgeServer() {
     server,
     descriptor: {
       protocolVersion: PROTOCOL_VERSION,
+      connectionGeneration,
       sessionId: session.sessionId,
       endpoint: `http://127.0.0.1:${port}`,
       authentication: {

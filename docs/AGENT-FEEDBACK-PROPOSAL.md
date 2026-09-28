@@ -624,10 +624,13 @@ transactional embedded store and a local socket/named pipe; use loopback only if
 the demonstrated extension lifecycle requires it. Pin compatible dependencies and
 record packaged-platform evidence before these choices become implementation facts.
 
-The active [Stage 0 feasibility record](AGENT-FEEDBACK-STAGE0.md) documents the
-installed host/SDK surface and a bounded project-extension diagnostic harness.
-That harness is evidence-gathering infrastructure, not application integration;
-its open gates remain authoritative until live multi-task and lifecycle tests pass.
+The finalized [Stage 0 feasibility record](AGENT-FEEDBACK-STAGE0.md) documents
+the installed host/SDK surface, live multi-task evidence, the bounded diagnostic
+harness, and the version-1 adapter contract. The result is a constrained go:
+Stage 2 may use explicit task-originated pairing, but the tested host exposes no
+supported global task discovery/activation/creation or seamless reverse-startup
+route. The diagnostic harness remains evidence infrastructure, not application
+integration.
 
 ### Stage 1 — Document and feedback foundations
 
@@ -640,14 +643,15 @@ the first integrated release complete.
 
 Implementation and local verification are recorded in
 [the Stage 1 implementation record](AGENT-FEEDBACK-STAGE1.md). This completes
-the local foundation only; it does not close the remaining Stage 0 integration
-gates or implement Stage 2 provider delivery.
+the local foundation only; it does not implement Stage 2 provider delivery.
 
 ### Stage 2 — Complete the Copilot feedback loop
 
-Pair files, dispatch through the verified companion, implement immediate/queued
-delivery, display receipts/replies/questions, recover connections, and correlate
-agent outcomes with file revisions. Add batch submission and review of results.
+Implement explicit task-originated pairing through the verified companion,
+dispatch immediate/queued delivery, display receipts/replies/questions, recover
+session-scoped connections, and correlate agent outcomes with file revisions.
+Add batch submission and review of results. Do not advertise seamless task
+discovery or reverse startup unless a later host capability is separately proven.
 
 ### Stage 3 — Walkthroughs and refinement
 

@@ -1,13 +1,37 @@
 # Agent feedback Stage 0 feasibility
 
-Status: active feasibility work, 2026-09-28. This document records observed
-capabilities of the installed GitHub Copilot app and the bounded diagnostic
-harness in this repository. It does not describe a shipped Visualizer feature.
+Status: feasibility finalized with a constrained-go decision, 2026-09-28. This
+document records observed capabilities of the installed GitHub Copilot app, the
+bounded diagnostic harness in this repository, and the contract that Stage 2
+may implement. It does not describe a shipped Visualizer feature.
 
 The product baseline remains
 [Visual feedback and agent integration](AGENT-FEEDBACK-PROPOSAL.md). Stage 0
 must prove that an external Visualizer process can address the intended existing
 Copilot task honestly and safely before application integration begins.
+
+## Final outcome
+
+Stage 0 is a **go** for an explicitly paired companion that is initiated from
+the intended Copilot task and remains scoped to that host-issued session
+identity. It is a **no-go** for seamless task discovery, task activation, task
+creation, or reverse startup from Visualizer with the installed host API.
+
+Stage 2 may therefore implement a first integrated workflow only with these
+constraints:
+
+- the user opens the companion in the Copilot task they intend to pair;
+- that task creates a short-lived, one-time local pairing capability;
+- Visualizer binds only explicitly selected documents to that identity;
+- a restart or lost provider requires explicit re-pairing;
+- immediate steering and queued delivery use separate receipt semantics; and
+- the UI never calls admission, a generic idle event, or an ambiguous steering
+  result “completed.”
+
+Do not scan task workspaces, infer a task from repository/path/title/recency, or
+silently create a second SDK conversation. A future host API can remove the
+explicit-pairing limitation only after a new capability check and feasibility
+record.
 
 ## Tested host
 
@@ -43,8 +67,9 @@ must not be interpreted as a general extension availability check.
 
 No supported external API for listing all desktop tasks, activating a task,
 creating a task, or obtaining a session identity by repository was established.
-The reverse startup flow and natural-language launch flow therefore remain open
-Stage 0 gates. A joined extension proves control of its own task only.
+The reverse startup and seamless natural-language launch requirements are
+therefore recorded as unsupported for this host version rather than left as
+indefinite Stage 0 gates. A joined extension proves control of its own task only.
 
 ## Diagnostic harness
 
@@ -106,6 +131,23 @@ result handled, executed, or complete.
   queue item, drained automatically after the active turn ended, and produced a
   correlated `user.message` with delivery `queued`, a new turn, and an assistant
   result. No second Run action was needed.
+- An external `enqueue` submission made after a second task reported exactly
+  `idle` was consumed with delivery `idle`, produced a correlated assistant
+  result, and returned to `session.idle` without another click.
+- An external `immediate` submission made after that task reported exactly
+  `idle` was also consumed with delivery `idle`, not `steering`, and produced a
+  correlated result in the same task.
+- In interactive mode, a real `user_input.requested` event changed readiness to
+  `blocked`. A subsequently admitted queued probe remained unconsumed with one
+  pending queue item. After the matching clarification was answered, the block
+  cleared and the queued probe ran automatically with delivery `queued`.
+  Autopilot mode instead returned a synthetic user-unavailable answer immediately
+  and therefore is not a valid clarification-block test.
+- A safe shell probe completed without asking for permission under the current
+  host policy, so a persistent permission wait was not manufactured. The SDK's
+  correlated permission event contract is present; Stage 2 must preserve the
+  host prompt, pause dispatch when it occurs, and include a real interactive
+  permission wait in its release acceptance test.
 - A second simultaneous Copilot task in the same checkout loaded its own extension
   process, session ID, mode-`0600` descriptor, loopback port, and bearer token.
   The task-local token hashes and endpoints differed. Each authenticated status
@@ -113,26 +155,138 @@ result handled, executed, or complete.
   and the second task's immediate self-probe returned only to that conversation.
 - Extension reload reconnected the provider, preserved action routing for the
   open canvas instance, and replaced the descriptor with a new generation.
-  Broader restart and stale-generation behavior still require focused tests.
+  The final contract treats broader restart/wake failures as disconnects and
+  requires generation validation and explicit re-pair rather than automatic replay.
+- Live history showed that host turn IDs can be reused after a resumed turn. The
+  diagnostic now includes a connection generation and monotonic event sequence
+  and retains the first chronological turn-end match instead of overwriting it.
 
-These checks demonstrate routing and authentication structure. They do not yet
-prove delivery while already idle, blocked-state queue holding, or full
-application/crash recovery.
+These checks demonstrate routing, authentication, queue advancement, and
+isolation. The finalized product contract below deliberately chooses
+disconnect-and-re-pair behavior for lifecycle cases that cannot be made seamless
+with the exposed API.
 
-## Remaining Stage 0 gates
+## Acceptance result
 
-1. Run queued and immediate submissions while the task is already idle. Complete
-   final `assistant.turn_end` and `session.idle` correlation for admitted messages.
-2. Trigger a real permission wait and clarification wait. Confirm local queued
-   work does not advance and that the blocking response remains usable.
-3. Reload the extension, restart the app, sleep/wake the machine, close canvases,
-   and switch foreground tasks. Record descriptor cleanup, provider rehydration,
-   and stale-generation rejection.
-4. Establish a supported launch/pairing route from a task to the external
-   Visualizer and a supported reverse pairing route without matching by filename,
-   title, repository, or recency.
-5. After those results, define the versioned adapter capability contract and
-   choose the production local transport and transactional store.
+| Requirement | Result |
+| --- | --- |
+| Join the originating task without a second conversation | Proven through `joinSession()` and matching host-issued identity. |
+| Immediate while busy | Proven to enter the steering lane in the same task. Admission and global turn completion are observable; a steering reply is not always attributable to one feedback item. |
+| Queue while busy | Proven to remain pending, start automatically, and correlate admission, `user.message`, turn, reply, and final idle without a second Run action. |
+| Delivery while already idle | Proven through an external authenticated sender after the target reported `idle`; the admitted item started without another click. |
+| Questions and permission waits | The host exposes correlated requested/completed events. A clarification wait was exercised with queued work held until the answer. The safe permission probe was auto-allowed, so a real permission wait remains a Stage 2 release test. Permission policy remains the host's responsibility; the companion must never answer it. |
+| Two tasks in one checkout | Proven to use separate identities, providers, descriptors, ports, capabilities, and queues. |
+| Canvas close and task focus | Canvas UI lifetime is separate from the session bridge. Focus is never used for routing; the bound host identity is. |
+| Reload and stale generation | Provider reload rehydrates the canvas and replaces the endpoint/token. Old descriptors do not acquire the replacement identity. |
+| Restart and sleep/wake | Final behavior is conservative: pause on disconnect, never replay an accepted/unknown attempt, validate generation after wake, and require explicit re-pair after provider/app restart. |
+| Seamless task discovery/activation/creation | Unsupported by the installed API. This is a finalized product limitation, not a deferred implementation assumption. |
 
-Application code must not consume this bridge until these gates establish the
-session identity, lifecycle, and recovery contracts.
+## Stage 2 adapter contract
+
+### Pairing and lifecycle
+
+Pairing is initiated inside the target Copilot task. The companion creates an
+ephemeral loopback endpoint and a 256-bit one-time bootstrap capability. Its
+task-local descriptor is mode `0600` on macOS/Linux, expires after five minutes,
+and is removed after exchange or provider shutdown. The user explicitly hands
+that pairing capability to Visualizer; Visualizer does not enumerate session
+workspaces.
+
+The pairing exchange returns:
+
+- protocol version;
+- opaque provider, host, and session identity;
+- a random connection generation;
+- supported delivery, event, and queue capabilities; and
+- current readiness and blocked reason.
+
+The bootstrap capability is rotated after exchange. The first release is
+session-only: connection secrets stay in memory, are not written to the feedback
+store, and are not automatically restored. Persistent reconnect may be added
+later only with OS-backed secret storage; there is no plaintext fallback.
+Unpairing revokes the in-memory capability, retires every affected binding
+generation, freezes pending work, and closes the bridge. Provider/app restart
+does the same implicitly and requires a new explicit pairing.
+
+Closing the diagnostic or future companion canvas does not retarget or silently
+unpair an established bridge; explicit Unpair owns that decision. A provider
+disconnect pauses dispatch. After sleep/wake, Visualizer must verify endpoint,
+session identity, and connection generation before continuing. Any mismatch
+retires the connection. An accepted or unknown attempt is never replayed.
+
+### Transport and limits
+
+Authenticated HTTP on an operating-system-selected `127.0.0.1` port is the
+selected first transport because the joined extension runs in a separate host
+process and the loopback lifecycle has been exercised on both simultaneous
+tasks. Every request requires the current bearer capability, exact loopback
+`Host`, expected method and content type. Token comparison is constant-time.
+There are no callback URLs, non-loopback binds, shell commands, file reads, or
+permission decisions in the bridge.
+
+Protocol version 1 uses these operations:
+
+| Operation | Required input and result |
+| --- | --- |
+| `POST /v1/pair` | One-time bootstrap capability and Visualizer nonce; returns connection identity, generation, capabilities, and readiness. |
+| `GET /v1/status` | Returns identity/generation, readiness, blocked reason, queue summary, and last monotonically increasing event sequence. |
+| `POST /v1/bindings` | Explicit document ID, canonical-path hash, saved revision, and requested capabilities; returns binding ID and generation. The raw path is shown to the user locally but is not required by the bridge. |
+| `POST /v1/submissions` | Submission ID, binding generation, document/dispatch revisions, delivery intent, and frozen feedback context; returns accepted, rejected, or unknown plus provider message ID when supplied. |
+| `GET /v1/events` | Cursor and page limit; returns ordered readiness, receipt, reply/result, block, and disconnect events for the current generation. |
+| `POST /v1/bindings/{id}/revoke` | Retires the binding generation and returns durable local retirement state. It cannot retract host-accepted content. |
+
+Version 1 limits are:
+
+- 1 MiB maximum JSON request or response body;
+- 128 ASCII characters per opaque ID;
+- 10,000 characters per feedback item and 32 items per submission;
+- 512 KiB maximum generated provider prompt;
+- 240 characters for a display label;
+- 100 events per event page;
+- five seconds for connect/handshake and 30 seconds for host admission; and
+- FIFO queued dispatch per session connection, with immediate steering allowed
+  to bypass waiting items but never an unresolved accepted/unknown barrier.
+
+Any admission timeout after the host call begins becomes `unknown`, not failed.
+Malformed, oversized, stale-generation, unauthorized, or out-of-order requests
+are rejected explicitly. Binary attachments and crops are disabled in the first
+integrated release. Submitted context is limited to user text, paired document
+identity, immutable revision, target IDs/bounds, relevant element data, and
+readable labels. An opt-in local crop can be added later only when the adapter
+advertises image support.
+
+### Receipts, readiness, and correlation
+
+The adapter exposes `disconnected`, `idle`, `working`, `blocked`, and `error`
+readiness. `permission.requested` and `user_input.requested` produce `blocked`
+with their host correlation ID; only the matching completed event clears it.
+The dispatcher never answers either request.
+
+`session.send()` returning a message ID means **admitted** only. Matching
+`user.message` means **consumed**. A correlated assistant message means a
+**reply observed**. `assistant.turn_end` followed by `session.idle` means the
+host became globally idle after that turn; it does not prove file changes,
+user acceptance, or completion of an uncorrelated immediate steering item.
+Correlation is scoped to connection generation and chronological event
+sequence because host turn IDs may be reused after resume.
+
+Queued submissions can own a distinct correlated turn. Immediate submissions
+join the current steering turn and therefore show session-level progress unless
+the host supplies a distinct originating message ID. The UI must retain
+`accepted` or `unknown` rather than inventing a per-feedback result.
+
+### Durable state
+
+Stage 2 will replace the Stage 1 JSON feedback file with one application-private
+SQLite store using the Electron runtime's verified built-in `node:sqlite`.
+Feedback, bindings, generations, immutable submissions, outbox ordering,
+attempts, receipts, replies, retirement state, and migration state share
+transactions. Enable foreign keys, WAL, bounded busy handling, and schema
+version migrations. Keep any future crop assets in a private content-addressed
+directory referenced by the database; never create repository sidecars.
+
+Before dispatch, persist the immutable submission and attempt. After host
+admission, persist the provider message ID and accepted state in one transaction.
+A crash in between yields `unknown`, blocks later queued work for that connection,
+and requires reconciliation or explicit user override. Local feedback remains
+usable offline and integration-disabled editing makes no network request.
