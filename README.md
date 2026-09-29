@@ -67,8 +67,8 @@ The packages are currently unsigned for distribution.
 - Standard Excalidraw stroke and fill palettes whenever an element is selected
 - A canvas-first **Give feedback** mode that hides application chrome, enters
   Excalidraw zen mode, and keeps only a compact recorder over the drawing
-- Feedback targets anchored to selected elements, points, rectangular regions, or
-  the whole drawing; overlays never enter the `.excalidraw` file
+- Automatic feedback context from bounded pointer movement, hovered element IDs,
+  click order, and relative timing; overlays never enter the `.excalidraw` file
 - Explicit one-time pairing with the current GitHub Copilot task, with separate
   queue/send-now delivery, admission receipts, replies, blocked state, and result history
 - Bundled offline English, Swedish, and automatic-language dictation using a pinned
@@ -79,18 +79,22 @@ The packages are currently unsigned for distribution.
 
 Open **Give feedback** on a drawing. Visualizer temporarily hides its header, tabs,
 and document toolbar and asks Excalidraw to use zen mode so the canvas stays visible.
-Start dictating and click relevant elements while speaking; Visualizer accumulates
-those elements into the feedback target. If no element is clicked, the target remains
-the whole drawing. Point, region, and current-selection targeting remain available.
-**Copy for agent** puts a revision-labelled text submission on the clipboard, so the
-local workflow also works without pairing an agent.
+Start dictating and interact naturally with the drawing. Visualizer samples pointer
+movement and hovered element IDs and records click order and relative timing. Clicked
+elements become the feedback target automatically; if nothing is clicked, the target
+remains the whole drawing. No target picker is required. **Copy for agent** puts a
+revision-labelled text submission on the clipboard, so the local workflow also works
+without pairing an agent.
 
 The feedback composer also supports local dictation. Choose **English**, **Svenska**,
-or **Auto language**, start recording, interact with the canvas, then stop and review
-the editable transcript. The panel collapses to a compact recorder during capture.
-Audio is converted to bounded PCM, processed locally with VAD, and removed after
-completion, cancellation, or failure. Existing typed text is preserved when
-microphone permission or transcription fails.
+or **Auto language**, start recording, and interact with the canvas. When paired,
+one **Send feedback** action stops recording, transcribes locally, sends immediately,
+clears the completed message, and leaves the panel ready for the next recording.
+Without pairing, **Finish dictation** keeps the editable transcript for copying.
+The panel collapses to a compact recorder during capture. Audio is converted to
+bounded PCM, processed locally with VAD, and removed after completion, cancellation,
+or failure. Existing typed text is preserved when microphone permission or
+transcription fails.
 
 To deliver feedback directly to the intended GitHub Copilot task:
 
@@ -226,7 +230,7 @@ written to `release/`. The builder configuration sets:
 - Windows targets: x64 NSIS installer and x64 portable executable
 - macOS targets: Apple silicon and Intel x64 DMGs for macOS 13 or newer
 - `.excalidraw` file association
-- a bundled Copilot companion that can be installed user-wide from the Comments
+- a bundled Copilot companion that can be installed user-wide from the Give feedback
   panel
 
 The current builds use a simple project icon from `build/`; it can be replaced with final
@@ -331,9 +335,10 @@ upstream CDN font fallback so missing local assets fail closed instead of attemp
 network request. Optional Copilot delivery uses only an authenticated loopback
 connection to the explicitly paired task-local companion. Visualizer sends no request
 to a remote endpoint; the Copilot host may process the feedback through its configured
-service after the user chooses Queue or Send now. Only the frozen feedback text,
-target metadata, opaque document identity, readable filename, and revision are sent;
-the drawing file and dictation audio are not uploaded by Visualizer.
+service after the user chooses Queue, Send now, or the recording-time **Send
+feedback** action. Only the frozen feedback text, target metadata, bounded interaction
+trace, opaque document identity, readable filename, and revision are sent; the
+drawing file and dictation audio are not uploaded by Visualizer.
 
 The renderer denies remote window creation and navigation. Electron permissions are
 denied except for an audio-only microphone request from the trusted renderer after the

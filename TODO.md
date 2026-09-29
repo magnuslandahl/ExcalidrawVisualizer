@@ -72,6 +72,9 @@ adapters and walkthrough recording remain future capabilities.
     clicked elements, hides editor chrome, collapses during recording, keeps
     Unpair as the final panel action, and gives immediate small edits a focused
     fast-path prompt.
+  - [x] Remove target-first composition: capture bounded movement, hover, click
+    order, and relative timing automatically, then stop, transcribe, immediately
+    send, reset, and prepare the next message through one recording-time action.
   - [x] Bundle the companion in packaged applications and add an explicit
     user-wide install/update action that refuses to overwrite unmanaged copies.
 - [ ] Evaluate walkthrough recording and additional agent adapters only after the
