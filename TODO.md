@@ -68,6 +68,10 @@ adapters and walkthrough recording remain future capabilities.
     replay until an unknown attempt is explicitly retired.
   - [x] Add Queue and Send now controls, task readiness/blocking state,
     replies/results, and delivery history to the feedback panel.
+  - [x] Streamline feedback into a canvas-first dictation flow that accumulates
+    clicked elements, hides editor chrome, collapses during recording, keeps
+    Unpair as the final panel action, and gives immediate small edits a focused
+    fast-path prompt.
   - [x] Bundle the companion in packaged applications and add an explicit
     user-wide install/update action that refuses to overwrite unmanaged copies.
 - [ ] Evaluate walkthrough recording and additional agent adapters only after the
