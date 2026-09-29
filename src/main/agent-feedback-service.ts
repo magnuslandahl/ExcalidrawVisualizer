@@ -156,7 +156,8 @@ const parsePairingCode = (pairingCode: string): PairingDescriptor => {
 
 const formatPrompt = (
   displayLabel: string,
-  submission: LocalFeedbackSubmission
+  submission: LocalFeedbackSubmission,
+  mode: AgentDeliveryMode
 ): string => {
   const items = submission.feedback.map((feedback, index) => ({
     number: index + 1,
@@ -166,6 +167,9 @@ const formatPrompt = (
   return [
     `Apply visual feedback to ${displayLabel}.`,
     `The file on disk is the source of truth. Document revision: ${submission.documentRevision}.`,
+    mode === 'immediate'
+      ? 'This is an immediate collaboration turn. For a narrow request, inspect only the necessary context, make the smallest complete change now, and run only focused validation. Do not turn a simple edit into a broad audit or refactor.'
+      : 'This is queued follow-up work. Complete it in sequence with any earlier task context.',
     'Review each item, make only the requested changes, preserve unrelated content, and report what changed.',
     '',
     JSON.stringify({ submissionId: submission.id, items }, null, 2)
@@ -430,7 +434,11 @@ export class AgentFeedbackService {
               0,
               240
             ),
-            prompt: formatPrompt(input.displayLabel, input.submission)
+            prompt: formatPrompt(
+              input.displayLabel,
+              input.submission,
+              input.mode
+            )
           }
         },
         connection.token,

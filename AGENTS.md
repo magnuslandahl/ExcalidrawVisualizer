@@ -154,8 +154,8 @@ execute the emitted ESM preload bundle.
   into another secured application window; each window owns its own registry
   and dirty-close guard while sharing private feedback and dictation services.
 - The application header contains theme, New, and Open controls. Each document
-  toolbar shows its file, save/watch status, comments, canvas color, Fit to
-  Content, and Reload controls.
+  toolbar shows its file, save/watch status, **Give feedback**, canvas color,
+  Fit to Content, and Reload controls.
 - The application header shows the running version and an explicit update
   control. It does not contact GitHub until clicked. A current build reports
   `No update available`; a newer Windows/macOS package is downloaded, verified
@@ -172,16 +172,21 @@ execute the emitted ESM preload bundle.
 - Errors and watcher states are visible; malformed external content never
   replaces the last valid scene.
 - Conflicts offer Keep local, Load external, and Save local as a separate file.
-- The collapsible feedback panel stores local drafts anchored to selected
-  elements, points, regions, or the whole drawing. Feedback overlays are not
-  Excalidraw elements and never enter saved or exported drawings.
+- Give feedback is canvas-first: while it is open, application chrome is hidden
+  and Excalidraw uses zen mode; while dictating, the panel collapses to a compact
+  recorder. Clicking elements while speaking accumulates them into one target,
+  defaulting to the whole drawing when nothing is clicked.
+- Feedback can target selected elements, points, regions, or the whole drawing.
+  Its overlays are not Excalidraw elements and never enter saved or exported
+  drawings.
 - Copy for agent creates an immutable local submission snapshot and copies it to
-  the clipboard. Copy again recovers a prior snapshot.
+  the clipboard. Persistence remains an implementation detail for immutable
+  delivery and recovery rather than a saved-feedback management UI.
 - The companion canvas issues a five-minute, one-time pairing capability from
   the intended Copilot task. Queue and Send now create immutable SQLite-backed
   attempts and show accepted, consumed, reply-observed, idle-after-turn,
   rejected, unknown, and retired states without conflating them.
-- The Comments panel installs or updates the companion from a packaged,
+- The Give feedback panel installs or updates the companion from a packaged,
   immutable resource into the current user's Copilot extensions directory.
   Installation is explicit, user-wide, and refuses to overwrite an unmanaged
   same-named extension. A new Copilot task or restart activates changes.
@@ -317,10 +322,15 @@ main handler, validation, and tests together.
 - viewport-preserving external updates
 - theme and canvas color controls
 - drag and drop, commands, banners, and conflict actions
-- scene-coordinate feedback capture and overlays outside scene state
-- persisted feedback composition, history, and clipboard recovery
+- canvas-first scene-coordinate feedback capture and current-target overlays
+  outside scene state
+- persisted immutable feedback composition and clipboard recovery without a
+  saved-feedback management surface
 - explicit task pairing, queue/send-now controls, honest receipt/reply history,
   and no-replay recovery for unknown admission
+- immediate delivery prompts optimized for small collaborative edits: inspect
+  only necessary context, make the smallest complete change, and use focused
+  validation rather than a broad audit
 - explicit AudioWorklet microphone capture, PCM conversion, and editable
   transcription
 
@@ -439,7 +449,7 @@ Outputs:
 
 Packaged applications also carry the checked-in
 `.github/extensions/excalidraw-visualizer-companion` directory as an immutable
-resource for explicit user-wide installation from the Comments panel.
+resource for explicit user-wide installation from the Give feedback panel.
 
 These paths are generated and ignored.
 
@@ -602,8 +612,8 @@ Implemented:
 - public repository, protected `main`, rolling `latest`, and permanent `v0.1.0`
 - per-document tabs and controllers with canonical path ownership and Save As
   copy semantics
-- local anchored feedback drafts, atomic private persistence, clipboard
-  submissions, and copy recovery
+- canvas-first anchored feedback capture, atomic private persistence, immutable
+  clipboard submissions, and direct Copilot delivery
 - bundled local English/Swedish dictation with pinned model/VAD inputs,
   microphone-only permission, serialized native jobs, cancellation, and cleanup
 - finalized GitHub Copilot Stage 0 feasibility: explicit task-originated pairing

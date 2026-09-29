@@ -114,6 +114,9 @@ describe('AgentFeedbackService', () => {
     const connectionToken = 'connection-token-12345678901234567890'
     const events: unknown[] = []
     const providerEvents: Array<Record<string, unknown>> = []
+    let submissionRequest:
+      | { deliveryIntent: string; prompt: string }
+      | undefined
     const server = createServer(async (request, response) => {
       const url = new URL(request.url ?? '/', 'http://127.0.0.1')
       if (request.method === 'POST' && url.pathname === '/v1/pair') {
@@ -139,7 +142,12 @@ describe('AgentFeedbackService', () => {
         return
       }
       if (request.method === 'POST' && url.pathname === '/v1/submissions') {
-        const body = (await readBody(request)) as { attemptId: string }
+        const body = (await readBody(request)) as {
+          attemptId: string
+          deliveryIntent: string
+          prompt: string
+        }
+        submissionRequest = body
         providerEvents.push(
           {
             sequence: 1,
@@ -211,10 +219,19 @@ describe('AgentFeedbackService', () => {
       storageDocumentId: 'document-storage-key',
       displayLabel: 'architecture.excalidraw',
       submission,
-      mode: 'enqueue',
+      mode: 'immediate',
       generation
     })
 
+    expect(submissionRequest).toMatchObject({
+      deliveryIntent: 'immediate'
+    })
+    expect(submissionRequest?.prompt).toContain(
+      'This is an immediate collaboration turn.'
+    )
+    expect(submissionRequest?.prompt).toContain(
+      'Do not turn a simple edit into a broad audit or refactor.'
+    )
     expect(admitted).toMatchObject({
       status: 'accepted',
       providerMessageId: 'message-1'

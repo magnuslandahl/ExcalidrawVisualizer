@@ -65,9 +65,10 @@ The packages are currently unsigned for distribution.
 - Running version and an explicit, checksum-verified update control in the toolbar
 - Arbitrary canvas background colors saved as normal Excalidraw document state
 - Standard Excalidraw stroke and fill palettes whenever an element is selected
-- Local feedback drafts anchored to selected elements, points, rectangular regions, or
+- A canvas-first **Give feedback** mode that hides application chrome, enters
+  Excalidraw zen mode, and keeps only a compact recorder over the drawing
+- Feedback targets anchored to selected elements, points, rectangular regions, or
   the whole drawing; overlays never enter the `.excalidraw` file
-- Persistent feedback history with clipboard submission and copy-again recovery
 - Explicit one-time pairing with the current GitHub Copilot task, with separate
   queue/send-now delivery, admission receipts, replies, blocked state, and result history
 - Bundled offline English, Swedish, and automatic-language dictation using a pinned
@@ -76,27 +77,33 @@ The packages are currently unsigned for distribution.
 
 ## Local feedback and GitHub Copilot pairing
 
-Open **Comments** on a drawing to create feedback for selected elements, a point, a
-region, or the whole drawing. Drafts and copy history are stored in the application's
-private local data, not in the drawing. **Copy for agent** puts a revision-labelled
-text submission on the clipboard; **Copy again** recovers the same immutable snapshot.
-This local workflow works without pairing an agent.
+Open **Give feedback** on a drawing. Visualizer temporarily hides its header, tabs,
+and document toolbar and asks Excalidraw to use zen mode so the canvas stays visible.
+Start dictating and click relevant elements while speaking; Visualizer accumulates
+those elements into the feedback target. If no element is clicked, the target remains
+the whole drawing. Point, region, and current-selection targeting remain available.
+**Copy for agent** puts a revision-labelled text submission on the clipboard, so the
+local workflow also works without pairing an agent.
 
 The feedback composer also supports local dictation. Choose **English**, **Svenska**,
-or **Auto language**, explicitly start recording, then stop and review the editable
-transcript. Audio is converted to bounded PCM, processed locally with VAD, and removed
-after completion, cancellation, or failure. Existing typed text is preserved when
+or **Auto language**, start recording, interact with the canvas, then stop and review
+the editable transcript. The panel collapses to a compact recorder during capture.
+Audio is converted to bounded PCM, processed locally with VAD, and removed after
+completion, cancellation, or failure. Existing typed text is preserved when
 microphone permission or transcription fails.
 
 To deliver feedback directly to the intended GitHub Copilot task:
 
-1. In Visualizer, open **Comments** and choose **Install Copilot companion**.
+1. In Visualizer, open **Give feedback** and choose **Install Copilot companion**.
    Restart GitHub Copilot or open a new task after installation or an update.
 2. Open the **Excalidraw Visualizer Companion** canvas in the intended Copilot
    task.
 3. Choose **Copy one-time pairing code**.
 4. In Visualizer, paste the code under **Copilot task** and pair.
-5. Compose feedback and choose **Queue for paired task** or **Send now**.
+5. Compose feedback and choose **Queue** for normal follow-up or **Send now** to
+   steer the paired task immediately. Immediate feedback explicitly asks the agent
+   to make narrow changes with focused inspection and validation instead of turning
+   a small edit into a broad audit.
 
 The installer copies the companion shipped with Visualizer into the current
 user's Copilot extension directory, so it is available from every repository.
@@ -405,8 +412,8 @@ Security boundaries:
   managed-device policy may block them.
 - macOS packages are ad-hoc signed but not Developer ID signed or notarized, so
   Gatekeeper blocks the first launch until the user explicitly approves it.
-- Local feedback can be copied for an agent, but automatic delivery, task pairing,
-  replies, and provider receipts remain planned work.
+- Copilot delivery requires explicit task-originated pairing for each app/provider
+  session; Visualizer cannot discover or activate arbitrary tasks.
 - Linux packaging is not configured.
 
 ## License

@@ -320,6 +320,60 @@ try {
     'both launch-path tabs and non-zero canvas layers'
   )
 
+  await connection.evaluate(`(() => {
+    const button = [...document.querySelectorAll('.editor-slot--active .document-toolbar button')]
+      .find((candidate) => candidate.textContent?.trim() === 'Give feedback')
+    if (!(button instanceof HTMLButtonElement)) {
+      throw new Error('The Give feedback control is unavailable')
+    }
+    button.click()
+  })()`)
+  const feedbackFocusState = await waitFor(
+    () =>
+      connection.evaluate(`(() => {
+        const app = document.querySelector('.app')
+        const panel = document.querySelector('.feedback-panel')
+        const canvas = document.querySelector('.editor-slot--active .canvas-shell')
+        return {
+          active: app?.classList.contains('app--feedback-active') ?? false,
+          appHeaderHidden:
+            getComputedStyle(document.querySelector('.app-header')).display === 'none',
+          tabsHidden:
+            getComputedStyle(document.querySelector('.document-tabs')).display === 'none',
+          toolbarHidden:
+            getComputedStyle(
+              document.querySelector('.editor-slot--active .document-toolbar')
+            ).display === 'none',
+          panelWidth: panel?.getBoundingClientRect().width ?? 0,
+          canvasHeight: canvas?.getBoundingClientRect().height ?? 0
+        }
+      })()`),
+    (state) =>
+      state.active &&
+      state.appHeaderHidden &&
+      state.tabsHidden &&
+      state.toolbarHidden &&
+      state.panelWidth > 0 &&
+      state.panelWidth <= 342 &&
+      state.canvasHeight > (initialState.canvasShell?.height ?? 0),
+    'canvas-first feedback mode'
+  )
+  await connection.evaluate(`(() => {
+    const button = document.querySelector('.feedback-panel > header > button')
+    if (!(button instanceof HTMLButtonElement)) {
+      throw new Error('The feedback close control is unavailable')
+    }
+    button.click()
+  })()`)
+  await waitFor(
+    () =>
+      connection.evaluate(
+        `!document.querySelector('.app')?.classList.contains('app--feedback-active')`
+      ),
+    Boolean,
+    'feedback mode to close'
+  )
+
   if (shouldCheckUpdates) {
     await connection.evaluate(`(() => {
       const button = document.querySelector('.update-button')
@@ -507,6 +561,11 @@ try {
         appVersion: finalState.appVersion,
         updateControl: finalState.updateLabel,
         manualUpdateCheck: manualUpdateState,
+        feedbackCanvasFocus:
+          feedbackFocusState.appHeaderHidden &&
+          feedbackFocusState.tabsHidden &&
+          feedbackFocusState.toolbarHidden,
+        feedbackPanelWidth: feedbackFocusState.panelWidth,
         tabOverflowHidden: finalState.tabOverflowY === 'hidden',
         launchPathTabs: initialState.tabs.length,
         canvasLayers: initialState.canvases.length,
