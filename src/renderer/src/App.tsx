@@ -33,11 +33,13 @@ import type {
   OpenedDocument,
   UpdateCheckResult
 } from '../../shared/contracts'
-import type {
-  FeedbackBounds,
-  FeedbackDocumentState,
-  FeedbackTarget,
-  LocalFeedback
+import {
+  MAX_FEEDBACK_INTERACTION_EVENTS,
+  type FeedbackBounds,
+  type FeedbackDocumentState,
+  type FeedbackInteraction,
+  type FeedbackTarget,
+  type LocalFeedback
 } from '../../shared/feedback'
 import type {
   AgentConnectionStatus,
@@ -108,8 +110,6 @@ type ContextMenuState = {
   y: number
 }
 
-type CaptureMode = 'point' | 'region' | null
-
 type RecordingSession = {
   audioContext: AudioContext
   processor: AudioWorkletNode
@@ -119,6 +119,27 @@ type RecordingSession = {
   sourceSampleRate: number
   draftId: string
   timeout?: ReturnType<typeof setTimeout>
+}
+
+type FeedbackDraftSnapshot = {
+  text: string
+  target: FeedbackTarget
+  interactionTrace: FeedbackInteraction[]
+}
+
+type PointerUpdate = {
+  pointer: {
+    x: number
+    y: number
+    tool: 'pointer' | 'laser'
+  }
+  button: 'down' | 'up'
+}
+
+type PointerSample = {
+  at: number
+  point: FeedbackInteraction['point']
+  elementIds: string[]
 }
 
 const themePreferenceStorageKey = 'excalidraw-visualizer-theme'
@@ -251,6 +272,7 @@ const elementFeedbackTarget = (
         targetIds.add(binding.id)
       }
     }
+
     if (
       'containerId' in element &&
       typeof element.containerId === 'string' &&
@@ -279,6 +301,26 @@ const elementFeedbackTarget = (
   }
 }
 
+const elementIdsAtPoint = (
+  elements: readonly OrderedExcalidrawElement[],
+  point: FeedbackInteraction['point']
+): string[] =>
+  elements
+    .filter(
+      (element) =>
+        !element.isDeleted &&
+        point.x >= element.x &&
+        point.x <= element.x + element.width &&
+        point.y >= element.y &&
+        point.y <= element.y + element.height
+    )
+    .slice(-16)
+    .reverse()
+    .map((element) => element.id)
+
+const sameIds = (left: readonly string[], right: readonly string[]): boolean =>
+  left.length === right.length && left.every((id, index) => id === right[index])
+
 function DocumentEditor({
   document,
   event,
@@ -302,12 +344,15 @@ function DocumentEditor({
   const fingerprintRef = useRef(document.fingerprint)
   const handledEventVersionRef = useRef(0)
   const handledCommandVersionRef = useRef(0)
-  const canvasShellRef = useRef<HTMLDivElement | null>(null)
   const recordingRef = useRef<RecordingSession | null>(null)
   const recordingStartRef = useRef<object | null>(null)
   const dictationJobIdRef = useRef<string | null>(null)
-  const regionStartRef = useRef<{ x: number; y: number } | null>(null)
   const recordingTargetIdsRef = useRef(new Set<string>())
+  const interactionTraceRef = useRef<FeedbackInteraction[]>([])
+  const recordingStartedAtRef = useRef<number | null>(null)
+  const lastPointerButtonRef = useRef<'down' | 'up'>('up')
+  const lastPointerSampleRef = useRef<PointerSample | null>(null)
+  const draftTextRef = useRef('')
   const feedbackZenModeRef = useRef<boolean | null>(null)
 
   const [path, setPath] = useState<string | null>(document.path)
@@ -342,11 +387,12 @@ function DocumentEditor({
   const [draftCreatedAt, setDraftCreatedAt] = useState(() =>
     new Date().toISOString()
   )
-  const [draftTarget, setDraftTarget] = useState<FeedbackTarget | null>(null)
+  const [draftTarget, setDraftTarget] = useState<FeedbackTarget>({
+    type: 'drawing'
+  })
   const [draftText, setDraftText] = useState('')
   const draftIdRef = useRef(draftId)
-  const [captureMode, setCaptureMode] = useState<CaptureMode>(null)
-  const [regionPreview, setRegionPreview] = useState<FeedbackBounds | null>(null)
+  const [interactionEventCount, setInteractionEventCount] = useState(0)
   const [overlayViewport, setOverlayViewport] = useState({
     scrollX: 0,
     scrollY: 0,
@@ -364,6 +410,10 @@ function DocumentEditor({
   useEffect(() => {
     draftIdRef.current = draftId
   }, [draftId])
+
+  useEffect(() => {
+    draftTextRef.current = draftText
+  }, [draftText])
 
   useEffect(() => {
     const api = apiRef.current
@@ -912,16 +962,22 @@ function DocumentEditor({
   const startFreshDraft = useCallback((): void => {
     setDraftId(crypto.randomUUID())
     setDraftCreatedAt(new Date().toISOString())
-    setDraftTarget(null)
+    setDraftTarget({ type: 'drawing' })
     setDraftText('')
-    setCaptureMode(null)
-    setRegionPreview(null)
+    draftTextRef.current = ''
+    recordingTargetIdsRef.current.clear()
+    interactionTraceRef.current = []
+    setInteractionEventCount(0)
     setFeedbackError(null)
   }, [])
 
-  const persistDraft = useCallback(async (): Promise<LocalFeedback | null> => {
-    if (!draftTarget || draftText.trim().length === 0) {
-      setFeedbackError('Choose a target and enter feedback before saving.')
+  const persistDraft = useCallback(
+    async (
+      snapshot?: FeedbackDraftSnapshot
+    ): Promise<LocalFeedback | null> => {
+    const text = (snapshot?.text ?? draftText).trim()
+    if (text.length === 0) {
+      setFeedbackError('Dictate or enter feedback before sending.')
       return null
     }
     const draft: LocalFeedback = {
@@ -930,8 +986,10 @@ function DocumentEditor({
       createdAt: draftCreatedAt,
       updatedAt: new Date().toISOString(),
       status: 'draft',
-      text: draftText.trim(),
-      target: draftTarget
+      text,
+      target: snapshot?.target ?? draftTarget,
+      interactionTrace:
+        snapshot?.interactionTrace ?? interactionTraceRef.current
     }
     try {
       const saved = await window.desktop.upsertFeedback(draft)
@@ -948,7 +1006,9 @@ function DocumentEditor({
       setFeedbackError(messageFromError(error))
       return null
     }
-  }, [document.id, draftCreatedAt, draftId, draftTarget, draftText])
+  },
+    [document.id, draftCreatedAt, draftId, draftTarget, draftText]
+  )
 
   const copyFeedback = useCallback(async (): Promise<void> => {
     const currentDraft = await persistDraft()
@@ -1029,10 +1089,13 @@ function DocumentEditor({
   }, [])
 
   const deliverFeedback = useCallback(
-    async (mode: AgentDeliveryMode): Promise<void> => {
-      const currentDraft = await persistDraft()
+    async (
+      mode: AgentDeliveryMode,
+      snapshot?: FeedbackDraftSnapshot
+    ): Promise<boolean> => {
+      const currentDraft = await persistDraft(snapshot)
       if (!currentDraft) {
-        return
+        return false
       }
       setAgentBusy(true)
       try {
@@ -1050,14 +1113,16 @@ function DocumentEditor({
         ])
         setFeedbackState(nextFeedback)
         setAgentState(nextAgent)
-        startFreshDraft()
+        const accepted = result.attempt.status === 'accepted'
+        if (accepted) {
+          startFreshDraft()
+        }
         setFeedbackError(
-          result.attempt.status === 'accepted'
-            ? `${mode === 'immediate' ? 'Sent' : 'Queued'} ${result.submission.feedback.length} feedback item${
-                result.submission.feedback.length === 1 ? '' : 's'
-              }. Admission is confirmed; completion is still pending.`
+          accepted
+            ? `${mode === 'immediate' ? 'Sent' : 'Queued'} feedback. Ready for another message.`
             : result.attempt.detail ?? 'The delivery result is unknown.'
         )
+        return accepted
       } catch (error) {
         const refresh = await Promise.allSettled([
           window.desktop.listFeedback(document.id),
@@ -1070,6 +1135,7 @@ function DocumentEditor({
           setAgentState(refresh[1].value)
         }
         setFeedbackError(messageFromError(error))
+        return false
       } finally {
         setAgentBusy(false)
       }
@@ -1101,104 +1167,79 @@ function DocumentEditor({
     [document.id]
   )
 
-  const targetSelectedElements = useCallback((): void => {
+  const handlePointerUpdate = useCallback((update: PointerUpdate): void => {
+    const startedAt = recordingStartedAtRef.current
     const api = apiRef.current
-    if (!api) {
+    if (!recordingRef.current || startedAt === null || !api) {
       return
     }
-    const selected = api.getAppState().selectedElementIds
-    const target = elementFeedbackTarget(
-      api.getSceneElements(),
-      new Set(
-        Object.keys(selected).filter((elementId) => selected[elementId])
+
+    const now = performance.now()
+    const point = { x: update.pointer.x, y: update.pointer.y }
+    const elementIds = elementIdsAtPoint(api.getSceneElements(), point)
+    const isClick =
+      update.button === 'down' && lastPointerButtonRef.current !== 'down'
+    const previous = lastPointerSampleRef.current
+    const distanceSquared = previous
+      ? (point.x - previous.point.x) ** 2 +
+        (point.y - previous.point.y) ** 2
+      : Number.POSITIVE_INFINITY
+    const shouldCapture =
+      isClick ||
+      !previous ||
+      !sameIds(previous.elementIds, elementIds) ||
+      now - previous.at >= 250 ||
+      distanceSquared >= 24 ** 2
+
+    lastPointerButtonRef.current = update.button
+    if (!shouldCapture) {
+      return
+    }
+
+    const interaction: FeedbackInteraction = {
+      type: isClick ? 'click' : 'move',
+      elapsedMs: Math.max(0, Math.round(now - startedAt)),
+      point,
+      elementIds
+    }
+    let nextTrace = interactionTraceRef.current
+    if (nextTrace.length >= MAX_FEEDBACK_INTERACTION_EVENTS) {
+      if (!isClick) {
+        return
+      }
+      const firstMoveIndex = nextTrace.findIndex(
+        (event) => event.type === 'move'
       )
-    )
-    if (!target) {
-      setFeedbackError('Select one or more elements on the canvas first.')
-      return
+      if (firstMoveIndex < 0) {
+        return
+      }
+      nextTrace = nextTrace.filter((_, index) => index !== firstMoveIndex)
     }
-    setDraftTarget(target)
-    setCaptureMode(null)
-    setFeedbackError(null)
+    interactionTraceRef.current = [...nextTrace, interaction]
+    lastPointerSampleRef.current = { at: now, point, elementIds }
+    setInteractionEventCount(interactionTraceRef.current.length)
+
+    if (isClick && elementIds.length > 0) {
+      elementIds.forEach((id) => recordingTargetIdsRef.current.add(id))
+      const target = elementFeedbackTarget(
+        api.getSceneElements(),
+        recordingTargetIdsRef.current
+      )
+      if (target) {
+        setDraftTarget(target)
+      }
+    }
   }, [])
 
-  const scenePointFromPointer = useCallback(
-    (clientX: number, clientY: number): { x: number; y: number } | null => {
-      const api = apiRef.current
-      const shell = canvasShellRef.current
-      if (!api || !shell) {
-        return null
-      }
-      const bounds = shell.getBoundingClientRect()
-      const appState = api.getAppState()
-      return {
-        x: (clientX - bounds.left) / appState.zoom.value - appState.scrollX,
-        y: (clientY - bounds.top) / appState.zoom.value - appState.scrollY
-      }
-    },
-    []
-  )
-
-  const handleCapturePointerDown = useCallback(
-    (pointerEvent: React.PointerEvent<HTMLDivElement>): void => {
-      const point = scenePointFromPointer(pointerEvent.clientX, pointerEvent.clientY)
-      if (!point) {
-        return
-      }
-      if (captureMode === 'point') {
-        setDraftTarget({ type: 'point', point })
-        setCaptureMode(null)
-        setFeedbackPanelOpen(true)
-        return
-      }
-      regionStartRef.current = point
-      pointerEvent.currentTarget.setPointerCapture(pointerEvent.pointerId)
-      setRegionPreview({ ...point, width: 0, height: 0 })
-    },
-    [captureMode, scenePointFromPointer]
-  )
-
-  const handleCapturePointerMove = useCallback(
-    (pointerEvent: React.PointerEvent<HTMLDivElement>): void => {
-      const start = regionStartRef.current
-      if (captureMode !== 'region' || !start) {
-        return
-      }
-      const point = scenePointFromPointer(pointerEvent.clientX, pointerEvent.clientY)
-      if (!point) {
-        return
-      }
-      setRegionPreview({
-        x: Math.min(start.x, point.x),
-        y: Math.min(start.y, point.y),
-        width: Math.abs(point.x - start.x),
-        height: Math.abs(point.y - start.y)
-      })
-    },
-    [captureMode, scenePointFromPointer]
-  )
-
-  const handleCapturePointerUp = useCallback((): void => {
-    if (
-      captureMode === 'region' &&
-      regionPreview &&
-      regionPreview.width >= 2 &&
-      regionPreview.height >= 2
-    ) {
-      setDraftTarget({ type: 'region', region: regionPreview })
-      setCaptureMode(null)
-      setRegionPreview(null)
-      setFeedbackPanelOpen(true)
-    }
-    regionStartRef.current = null
-  }, [captureMode, regionPreview])
-
-  const finishRecording = useCallback(async (): Promise<void> => {
+  const finishRecording = useCallback(async (
+    sendAfterTranscription = false
+  ): Promise<void> => {
     const recording = recordingRef.current
     if (!recording) {
       return
     }
     recordingRef.current = null
+    recordingStartedAtRef.current = null
     if (recording.timeout) {
       clearTimeout(recording.timeout)
     }
@@ -1240,12 +1281,33 @@ function DocumentEditor({
       })
       if (result.ok) {
         if (draftIdRef.current === recording.draftId) {
-          setDraftText((current) =>
-            current.trim().length > 0
-              ? `${current.trim()} ${result.text}`
+          const existingText = draftTextRef.current.trim()
+          const text =
+            existingText.length > 0
+              ? `${existingText} ${result.text}`
               : result.text
-          )
-          setFeedbackError(null)
+          draftTextRef.current = text
+          setDraftText(text)
+          if (sendAfterTranscription) {
+            if (!agentState.connection.paired) {
+              setFeedbackError(
+                'Transcript ready. Pair a Copilot task before sending.'
+              )
+            } else {
+              const target =
+                elementFeedbackTarget(
+                  apiRef.current?.getSceneElements() ?? [],
+                  recordingTargetIdsRef.current
+                ) ?? { type: 'drawing' as const }
+              await deliverFeedback('immediate', {
+                text,
+                target,
+                interactionTrace: interactionTraceRef.current
+              })
+            }
+          } else {
+            setFeedbackError(null)
+          }
         } else {
           setFeedbackError(
             'The draft changed before dictation finished, so the transcript was not inserted.'
@@ -1260,7 +1322,12 @@ function DocumentEditor({
       dictationJobIdRef.current = null
       setDictationState('idle')
     }
-  }, [dictationLanguage, document.id])
+  }, [
+    agentState.connection.paired,
+    deliverFeedback,
+    dictationLanguage,
+    document.id
+  ])
 
   const startRecording = useCallback(async (): Promise<void> => {
     if (
@@ -1271,6 +1338,11 @@ function DocumentEditor({
       return
     }
     recordingTargetIdsRef.current.clear()
+    interactionTraceRef.current = []
+    recordingStartedAtRef.current = null
+    lastPointerButtonRef.current = 'up'
+    lastPointerSampleRef.current = null
+    setInteractionEventCount(0)
     setDraftTarget({ type: 'drawing' })
     const startToken = {}
     recordingStartRef.current = startToken
@@ -1327,6 +1399,7 @@ function DocumentEditor({
         }
       }, MAX_AUDIO_DURATION_SECONDS * 1000)
       recordingRef.current = recording
+      recordingStartedAtRef.current = performance.now()
       setDictationState('recording')
       setFeedbackError(null)
     } catch (error) {
@@ -1358,6 +1431,7 @@ function DocumentEditor({
       recording.source.disconnect()
       recording.stream.getTracks().forEach((track) => track.stop())
       await recording.audioContext.close()
+      recordingStartedAtRef.current = null
       setDictationState('idle')
       return
     }
@@ -1479,12 +1553,7 @@ function DocumentEditor({
           <button
             type="button"
             aria-pressed={feedbackPanelOpen}
-            onClick={() => {
-              setFeedbackPanelOpen((open) => !open)
-              if (!feedbackPanelOpen && !draftTarget) {
-                setDraftTarget({ type: 'drawing' })
-              }
-            }}
+            onClick={() => setFeedbackPanelOpen((open) => !open)}
           >
             Give feedback
           </button>
@@ -1525,7 +1594,7 @@ function DocumentEditor({
         </div>
       )}
 
-      <div className="canvas-shell" ref={canvasShellRef}>
+      <div className="canvas-shell">
         <Excalidraw
           key={editorSeed.key}
           initialData={initialData}
@@ -1533,6 +1602,7 @@ function DocumentEditor({
             apiRef.current = api
           }}
           onChange={handleEditorChange}
+          onPointerUpdate={handlePointerUpdate}
           theme={theme}
           autoFocus={focused}
           handleKeyboardGlobally={focused}
@@ -1573,40 +1643,7 @@ function DocumentEditor({
                 <span>1</span>
               </div>
             ))}
-          {regionPreview && (
-            <div
-              className="feedback-anchor feedback-anchor--preview"
-              style={toOverlayBounds(regionPreview)}
-            />
-          )}
         </div>
-        {captureMode && (
-          <div
-            className="feedback-capture"
-            role="button"
-            tabIndex={0}
-            aria-label={
-              captureMode === 'point'
-                ? 'Choose a comment point on the drawing'
-                : 'Drag a comment region on the drawing'
-            }
-            onPointerDown={handleCapturePointerDown}
-            onPointerMove={handleCapturePointerMove}
-            onPointerUp={handleCapturePointerUp}
-            onKeyDown={(keyboardEvent) => {
-              if (keyboardEvent.key === 'Escape') {
-                setCaptureMode(null)
-                setRegionPreview(null)
-              }
-            }}
-          >
-            <span>
-              {captureMode === 'point'
-                ? 'Click a point for this comment'
-                : 'Drag a region for this comment'}
-            </span>
-          </div>
-        )}
         {feedbackPanelOpen && (
           <aside
             className={`feedback-panel${
@@ -1722,71 +1759,17 @@ function DocumentEditor({
             </section>
 
             <section className="feedback-composer">
-              <div className="feedback-section-heading">
-                <span className="feedback-section-label">Target</span>
-                <span className="feedback-target-summary">
-                  {draftTarget ? targetLabel(draftTarget) : 'None selected'}
+              <div className="feedback-auto-context">
+                <div>
+                  <span className="feedback-section-label">
+                    Automatic context
+                  </span>
+                  <strong>{targetLabel(draftTarget)}</strong>
+                </div>
+                <span>
+                  {interactionEventCount} interaction
+                  {interactionEventCount === 1 ? '' : 's'}
                 </span>
-              </div>
-              <div className="feedback-target-actions">
-                <button
-                  type="button"
-                  className={
-                    draftTarget?.type === 'elements'
-                      ? 'feedback-target-button--active'
-                      : undefined
-                  }
-                  aria-pressed={draftTarget?.type === 'elements'}
-                  disabled={dictationState !== 'idle'}
-                  onClick={targetSelectedElements}
-                >
-                  Selection
-                </button>
-                <button
-                  type="button"
-                  className={
-                    draftTarget?.type === 'point'
-                      ? 'feedback-target-button--active'
-                      : undefined
-                  }
-                  aria-pressed={draftTarget?.type === 'point'}
-                  disabled={dictationState !== 'idle'}
-                  onClick={() => {
-                    setCaptureMode('point')
-                    setFeedbackPanelOpen(false)
-                  }}
-                >
-                  Point
-                </button>
-                <button
-                  type="button"
-                  className={
-                    draftTarget?.type === 'region'
-                      ? 'feedback-target-button--active'
-                      : undefined
-                  }
-                  aria-pressed={draftTarget?.type === 'region'}
-                  disabled={dictationState !== 'idle'}
-                  onClick={() => {
-                    setCaptureMode('region')
-                    setFeedbackPanelOpen(false)
-                  }}
-                >
-                  Region
-                </button>
-                <button
-                  type="button"
-                  className={
-                    draftTarget?.type === 'drawing'
-                      ? 'feedback-target-button--active'
-                      : undefined
-                  }
-                  aria-pressed={draftTarget?.type === 'drawing'}
-                  disabled={dictationState !== 'idle'}
-                  onClick={() => setDraftTarget({ type: 'drawing' })}
-                >
-                  Drawing
-                </button>
               </div>
 
               <label className="feedback-text-label">
@@ -1802,7 +1785,10 @@ function DocumentEditor({
                   rows={5}
                   disabled={dictationState !== 'idle'}
                   placeholder="Describe the requested change or question."
-                  onChange={(changeEvent) => setDraftText(changeEvent.target.value)}
+                  onChange={(changeEvent) => {
+                    draftTextRef.current = changeEvent.target.value
+                    setDraftText(changeEvent.target.value)
+                  }}
                 />
               </label>
 
@@ -1844,9 +1830,14 @@ function DocumentEditor({
                   <button
                     type="button"
                     className="primary-button"
-                    onClick={() => void finishRecording()}
+                    disabled={agentBusy}
+                    onClick={() =>
+                      void finishRecording(agentState.connection.paired)
+                    }
                   >
-                    Stop and transcribe
+                    {agentState.connection.paired
+                      ? 'Send feedback'
+                      : 'Finish dictation'}
                   </button>
                 )}
               </div>
@@ -1855,8 +1846,10 @@ function DocumentEditor({
                   {dictationState === 'starting'
                     ? 'Requesting microphone access…'
                     : dictationState === 'recording'
-                      ? 'Recording locally. Click relevant canvas elements while you speak.'
-                      : 'Transcribing locally…'}
+                      ? 'Recording movement, hovered elements, and clicks.'
+                      : agentState.connection.paired
+                        ? 'Transcribing locally, then sending…'
+                        : 'Transcribing locally…'}
                 </p>
               )}
               {feedbackError && (

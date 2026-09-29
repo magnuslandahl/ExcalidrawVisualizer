@@ -77,7 +77,21 @@ const arrangeStore = async (): Promise<{
     updatedAt: createdAt,
     status: 'draft',
     text: 'Move the title to the left.',
-    target: { type: 'drawing' }
+    target: { type: 'drawing' },
+    interactionTrace: [
+      {
+        type: 'move',
+        elapsedMs: 150,
+        point: { x: 20, y: 30 },
+        elementIds: ['title-element']
+      },
+      {
+        type: 'click',
+        elapsedMs: 420,
+        point: { x: 24, y: 34 },
+        elementIds: ['title-element']
+      }
+    ]
   })
   const submission = await store.createSubmission({
     id: 'submission-1',
@@ -232,6 +246,11 @@ describe('AgentFeedbackService', () => {
     expect(submissionRequest?.prompt).toContain(
       'Do not turn a simple edit into a broad audit or refactor.'
     )
+    expect(submissionRequest?.prompt).toContain(
+      'Interaction traces use drawing coordinates'
+    )
+    expect(submissionRequest?.prompt).toContain('"type": "click"')
+    expect(submissionRequest?.prompt).toContain('"title-element"')
     expect(admitted).toMatchObject({
       status: 'accepted',
       providerMessageId: 'message-1'

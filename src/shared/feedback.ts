@@ -1,8 +1,11 @@
 export const FEEDBACK_STORE_SCHEMA_VERSION = 1 as const
 export const MAX_FEEDBACK_TEXT_LENGTH = 10_000
+export const MAX_FEEDBACK_INTERACTION_EVENTS = 256
 
 const MAX_ID_LENGTH = 256
 const MAX_REVISION_LENGTH = 1_024
+const MAX_INTERACTION_ELEMENT_IDS = 16
+const MAX_INTERACTION_ELAPSED_MS = 60 * 60 * 1_000
 
 export type FeedbackStatus = 'draft' | 'submitted-local' | 'resolved'
 
@@ -42,6 +45,13 @@ export type FeedbackTarget =
   | PointFeedbackTarget
   | RegionFeedbackTarget
 
+export type FeedbackInteraction = {
+  type: 'move' | 'click'
+  elapsedMs: number
+  point: FeedbackPoint
+  elementIds: string[]
+}
+
 export type LocalFeedback = {
   id: string
   documentId: string
@@ -50,6 +60,7 @@ export type LocalFeedback = {
   status: FeedbackStatus
   text: string
   target: FeedbackTarget
+  interactionTrace?: FeedbackInteraction[]
 }
 
 export type LocalFeedbackSubmission = {
@@ -214,13 +225,90 @@ export const parseFeedbackTarget = (value: unknown): FeedbackTarget => {
   }
 }
 
+const parseFeedbackInteraction = (
+  value: unknown,
+  index: number
+): FeedbackInteraction => {
+  const label = `Feedback interaction ${index}`
+  if (!isRecord(value)) {
+    throw new FeedbackParseError(`${label} must be an object`)
+  }
+  assertExactKeys(value, ['type', 'elapsedMs', 'point', 'elementIds'], label)
+  if (value.type !== 'move' && value.type !== 'click') {
+    throw new FeedbackParseError(`${label} type is invalid`)
+  }
+  if (
+    typeof value.elapsedMs !== 'number' ||
+    !Number.isInteger(value.elapsedMs) ||
+    value.elapsedMs < 0 ||
+    value.elapsedMs > MAX_INTERACTION_ELAPSED_MS
+  ) {
+    throw new FeedbackParseError(
+      `${label}.elapsedMs must be an integer between 0 and ${MAX_INTERACTION_ELAPSED_MS}`
+    )
+  }
+  if (
+    !Array.isArray(value.elementIds) ||
+    value.elementIds.length > MAX_INTERACTION_ELEMENT_IDS
+  ) {
+    throw new FeedbackParseError(
+      `${label}.elementIds must contain at most ${MAX_INTERACTION_ELEMENT_IDS} ids`
+    )
+  }
+  const elementIds = value.elementIds.map((id, elementIndex) =>
+    parseFeedbackId(id, `${label} element id ${elementIndex}`)
+  )
+  if (new Set(elementIds).size !== elementIds.length) {
+    throw new FeedbackParseError(`${label} element ids must be unique`)
+  }
+  return {
+    type: value.type,
+    elapsedMs: value.elapsedMs,
+    point: parsePoint(value.point, `${label}.point`),
+    elementIds
+  }
+}
+
+export const parseFeedbackInteractionTrace = (
+  value: unknown
+): FeedbackInteraction[] => {
+  if (
+    !Array.isArray(value) ||
+    value.length > MAX_FEEDBACK_INTERACTION_EVENTS
+  ) {
+    throw new FeedbackParseError(
+      `Feedback interaction trace must contain at most ${MAX_FEEDBACK_INTERACTION_EVENTS} events`
+    )
+  }
+  let previousElapsedMs = -1
+  return value.map((interaction, index) => {
+    const parsed = parseFeedbackInteraction(interaction, index)
+    if (parsed.elapsedMs < previousElapsedMs) {
+      throw new FeedbackParseError(
+        'Feedback interaction trace must be ordered by elapsed time'
+      )
+    }
+    previousElapsedMs = parsed.elapsedMs
+    return parsed
+  })
+}
+
 export const parseLocalFeedback = (value: unknown): LocalFeedback => {
   if (!isRecord(value)) {
     throw new FeedbackParseError('Feedback must be an object')
   }
   assertExactKeys(
     value,
-    ['id', 'documentId', 'createdAt', 'updatedAt', 'status', 'text', 'target'],
+    [
+      'id',
+      'documentId',
+      'createdAt',
+      'updatedAt',
+      'status',
+      'text',
+      'target',
+      ...('interactionTrace' in value ? ['interactionTrace'] : [])
+    ],
     'Feedback'
   )
 
@@ -245,7 +333,10 @@ export const parseLocalFeedback = (value: unknown): LocalFeedback => {
     updatedAt,
     status: value.status,
     text: parseFeedbackText(value.text),
-    target: parseFeedbackTarget(value.target)
+    target: parseFeedbackTarget(value.target),
+    ...('interactionTrace' in value
+      ? { interactionTrace: parseFeedbackInteractionTrace(value.interactionTrace) }
+      : {})
   }
 }
 

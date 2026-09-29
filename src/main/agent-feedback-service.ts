@@ -162,7 +162,8 @@ const formatPrompt = (
   const items = submission.feedback.map((feedback, index) => ({
     number: index + 1,
     target: feedback.target,
-    text: feedback.text
+    text: feedback.text,
+    interactionTrace: feedback.interactionTrace ?? []
   }))
   return [
     `Apply visual feedback to ${displayLabel}.`,
@@ -171,6 +172,7 @@ const formatPrompt = (
       ? 'This is an immediate collaboration turn. For a narrow request, inspect only the necessary context, make the smallest complete change now, and run only focused validation. Do not turn a simple edit into a broad audit or refactor.'
       : 'This is queued follow-up work. Complete it in sequence with any earlier task context.',
     'Review each item, make only the requested changes, preserve unrelated content, and report what changed.',
+    'Interaction traces use drawing coordinates and relative milliseconds. Treat hovered elements, click order, and pointer movement as context for the transcribed request, not as independent commands.',
     '',
     JSON.stringify({ submissionId: submission.id, items }, null, 2)
   ].join('\n')

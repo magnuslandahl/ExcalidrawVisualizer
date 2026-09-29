@@ -345,7 +345,14 @@ try {
               document.querySelector('.editor-slot--active .document-toolbar')
             ).display === 'none',
           panelWidth: panel?.getBoundingClientRect().width ?? 0,
-          canvasHeight: canvas?.getBoundingClientRect().height ?? 0
+          canvasHeight: canvas?.getBoundingClientRect().height ?? 0,
+          automaticContext:
+            panel?.querySelector('.feedback-auto-context')?.textContent?.trim() ?? '',
+          startAction: [...(panel?.querySelectorAll('button') ?? [])]
+            .map((button) => button.textContent?.trim())
+            .find((label) => label === 'Start dictating') ?? '',
+          targetButtonCount:
+            panel?.querySelectorAll('.feedback-target-actions button').length ?? 0
         }
       })()`),
     (state) =>
@@ -355,7 +362,10 @@ try {
       state.toolbarHidden &&
       state.panelWidth > 0 &&
       state.panelWidth <= 342 &&
-      state.canvasHeight > (initialState.canvasShell?.height ?? 0),
+      state.canvasHeight > (initialState.canvasShell?.height ?? 0) &&
+      state.automaticContext.includes('Whole drawing') &&
+      state.startAction === 'Start dictating' &&
+      state.targetButtonCount === 0,
     'canvas-first feedback mode'
   )
   await connection.evaluate(`(() => {
@@ -566,6 +576,9 @@ try {
           feedbackFocusState.tabsHidden &&
           feedbackFocusState.toolbarHidden,
         feedbackPanelWidth: feedbackFocusState.panelWidth,
+        automaticFeedbackContext:
+          feedbackFocusState.automaticContext.includes('Whole drawing') &&
+          feedbackFocusState.targetButtonCount === 0,
         tabOverflowHidden: finalState.tabOverflowY === 'hidden',
         launchPathTabs: initialState.tabs.length,
         canvasLayers: initialState.canvases.length,

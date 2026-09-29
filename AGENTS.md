@@ -101,10 +101,11 @@ adopts those principles for its supported Windows and macOS packages.
   upload, index, or transmit drawing content automatically.
 - The only provider-delivery exception is an explicit user action after pairing
   from the intended Copilot task. Visualizer may send the immutable feedback
-  text, target metadata, opaque document identity, readable filename, and
-  revision through the authenticated task-local loopback companion. It must not
-  send the drawing file, unrelated elements, dictation audio, local paths, or
-  any data before Queue or Send now is chosen.
+  text, target metadata, bounded pointer interaction trace, opaque document
+  identity, readable filename, and revision through the authenticated task-local
+  loopback companion. It must not send the drawing file, unrelated elements,
+  dictation audio, local paths, or any data before Queue, Send now, or the
+  recording-time Send feedback action is chosen.
 - Connection/bootstrap secrets are memory-only. Do not persist them or add a
   plaintext fallback. Provider/app restart requires explicit re-pairing.
 
@@ -174,11 +175,13 @@ execute the emitted ESM preload bundle.
 - Conflicts offer Keep local, Load external, and Save local as a separate file.
 - Give feedback is canvas-first: while it is open, application chrome is hidden
   and Excalidraw uses zen mode; while dictating, the panel collapses to a compact
-  recorder. Clicking elements while speaking accumulates them into one target,
-  defaulting to the whole drawing when nothing is clicked.
-- Feedback can target selected elements, points, regions, or the whole drawing.
-  Its overlays are not Excalidraw elements and never enter saved or exported
-  drawings.
+  recorder. Bounded pointer movement, hovered element IDs, click order, and
+  relative timing are captured automatically. Clicked elements accumulate into
+  one target, defaulting to the whole drawing when nothing is clicked.
+- A paired recording ends with one Send feedback action that stops capture,
+  transcribes locally, immediately delivers the immutable message, resets the
+  composer, and leaves it ready for another recording. Its overlays and
+  interaction trace never enter saved or exported drawings.
 - Copy for agent creates an immutable local submission snapshot and copies it to
   the clipboard. Persistence remains an implementation detail for immutable
   delivery and recovery rather than a saved-feedback management UI.
@@ -322,8 +325,8 @@ main handler, validation, and tests together.
 - viewport-preserving external updates
 - theme and canvas color controls
 - drag and drop, commands, banners, and conflict actions
-- canvas-first scene-coordinate feedback capture and current-target overlays
-  outside scene state
+- canvas-first scene-coordinate pointer/hover/click capture and current-target
+  overlays outside scene state
 - persisted immutable feedback composition and clipboard recovery without a
   saved-feedback management surface
 - explicit task pairing, queue/send-now controls, honest receipt/reply history,

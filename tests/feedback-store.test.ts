@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { FeedbackStore } from '../src/main/feedback-store'
 import {
   FeedbackParseError,
+  parseFeedbackInteractionTrace,
   parseFeedbackTarget,
   type FeedbackTarget,
   type LocalFeedback
@@ -111,6 +112,51 @@ describe('FeedbackStore', () => {
         originalBounds: { x: 0, y: 0, width: 10, height: 10 }
       })
     ).toThrow(FeedbackParseError)
+  })
+
+  it('persists bounded ordered interaction traces and accepts older drafts without one', async () => {
+    const { store } = await arrangeStore()
+    const tracedDraft: LocalFeedback = {
+      ...draft('feedback-traced', 'document-1'),
+      interactionTrace: [
+        {
+          type: 'move',
+          elapsedMs: 120,
+          point: { x: 10, y: 20 },
+          elementIds: ['rectangle-1']
+        },
+        {
+          type: 'click',
+          elapsedMs: 380,
+          point: { x: 30, y: 40 },
+          elementIds: ['rectangle-1', 'text-1']
+        }
+      ]
+    }
+
+    await store.upsertDraft(tracedDraft)
+    await store.upsertDraft(draft('feedback-legacy', 'document-1', undefined, 1))
+
+    expect((await store.list('document-1')).feedback).toEqual([
+      tracedDraft,
+      draft('feedback-legacy', 'document-1', undefined, 1)
+    ])
+    expect(() =>
+      parseFeedbackInteractionTrace([
+        {
+          type: 'click',
+          elapsedMs: 200,
+          point: { x: 0, y: 0 },
+          elementIds: []
+        },
+        {
+          type: 'move',
+          elapsedMs: 100,
+          point: { x: 1, y: 1 },
+          elementIds: []
+        }
+      ])
+    ).toThrow('ordered by elapsed time')
   })
 
   it('keeps immutable feedback snapshots in a submission', async () => {
