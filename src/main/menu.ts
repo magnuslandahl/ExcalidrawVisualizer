@@ -62,6 +62,18 @@ export const installApplicationMenu = (options: MenuOptions): void => {
         })
     },
     {
+      label: 'Export',
+      submenu: (['svg', 'png', 'webp'] as const).map((format) => ({
+        label: `Export ${format.toUpperCase()}${format === 'svg' ? ' (vector)' : ''}…`,
+        click: () =>
+          sendCommand(options.getWindow, {
+            type: 'export',
+            documentId: options.getActiveDocumentId(),
+            format
+          })
+      }))
+    },
+    {
       label: 'Reload from Disk',
       accelerator: 'CmdOrCtrl+Shift+R',
       click: () =>

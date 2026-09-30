@@ -128,6 +128,8 @@ images.
 - [x] Consolidate document tabs and controls into one compact row with readable
   filenames and overflow actions; default to view mode with explicit Edit while
   preserving dictation pointer/click context and per-document status.
+- [x] Add a visible Export control for vector SVG and 2× PNG/WebP raster images
+  using the current Excalidraw scene without modifying the drawing source.
 - [x] Extend packaged runtime smoke coverage across Windows and macOS to verify
   two launch-path tabs, non-zero split canvases, path-isolated external
   updates, autosave, detached windows, and zero remote renderer requests.

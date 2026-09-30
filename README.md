@@ -64,6 +64,8 @@ The packages are currently unsigned for distribution.
 - Explicit conflict choices: keep local, load external, or save local separately
 - Embedded image/file-map preservation and merging
 - Explicit Fit to Content without resetting the viewport on normal external updates
+- One-click drawing export to vector SVG or 2× raster PNG/WebP, without changing
+  the editable `.excalidraw` file
 - System, light, and dark application themes with a remembered preference
 - Running version and an explicit, checksum-verified update control in the overflow menu
 - Arbitrary canvas background colors saved as normal Excalidraw document state
@@ -77,6 +79,16 @@ The packages are currently unsigned for distribution.
 - Bundled offline English, Swedish, and automatic-language dictation using a pinned
   `whisper.cpp` helper, multilingual model, and Silero VAD
 - Fully local JavaScript, CSS, worker chunks, and Excalidraw fonts
+
+## Export a drawing
+
+Open a drawing and choose **Export** in the compact top row. Select
+**SVG (vector)** for scalable diagrams, or **PNG** / **WebP** for 2× raster images,
+then choose a local destination. Export includes the currently visible drawing,
+its embedded images, and its canvas background, including edits not yet saved.
+It excludes feedback overlays, selection handles, and the viewport. Export is
+offline, never changes the `.excalidraw` source, and does not replace the
+editable file format. WebP is not a vector format; choose SVG for vector output.
 
 ## Local feedback and GitHub Copilot pairing
 

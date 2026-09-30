@@ -31,9 +31,11 @@ import type {
   DictationLanguage,
   DocumentEvent,
   DocumentStatus,
+  ExportFormat,
   OpenedDocument,
   UpdateCheckResult
 } from '../../shared/contracts'
+import { renderExport } from './export-image'
 import {
   MAX_FEEDBACK_INTERACTION_EVENTS,
   type FeedbackBounds,
@@ -88,10 +90,12 @@ type EditorMeta = {
   feedbackCount: number
   feedbackLoaded: boolean
   feedbackActive: boolean
+  exporting: boolean
 }
 
 type EditorCommandAction =
   | { type: 'save' | 'save-as' | 'reload' | 'fit-to-content' | 'open-feedback' }
+  | { type: 'export'; format: ExportFormat }
   | { type: 'canvas-background'; color: string }
 
 type EditorCommand = EditorCommandAction & { version: number }
@@ -367,6 +371,8 @@ function DocumentEditor({
   const [status, setStatus] = useState<DocumentStatus>('saved')
   const [detail, setDetail] = useState<string | null>(null)
   const [dirty, setDirtyState] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const exportingRef = useRef(false)
   const [conflict, setConflict] = useState<ConflictState | null>(null)
   const [editorSeed, setEditorSeed] = useState<EditorSeed>({
     key: 1,
@@ -808,7 +814,8 @@ function DocumentEditor({
       canvasBackground,
       feedbackCount: feedbackState.feedback.length,
       feedbackLoaded,
-      feedbackActive: feedbackPanelOpen
+      feedbackActive: feedbackPanelOpen,
+      exporting
     })
   }, [
     dirty,
@@ -817,6 +824,7 @@ function DocumentEditor({
     feedbackState.feedback.length,
     feedbackLoaded,
     feedbackPanelOpen,
+    exporting,
     onMetaChange,
     path,
     status
@@ -933,6 +941,35 @@ function DocumentEditor({
     })
   }, [])
 
+  const exportDrawing = useCallback(async (format: ExportFormat): Promise<void> => {
+    if (exportingRef.current) {
+      return
+    }
+    exportingRef.current = true
+    setExporting(true)
+    setDetail(null)
+    try {
+      const api = apiRef.current
+      if (!api) {
+        throw new Error('The drawing is not ready')
+      }
+      const data = await renderExport(api, format)
+      const saved = await window.desktop.exportDrawing({
+        documentId: document.id,
+        format,
+        data
+      })
+      if (saved) {
+        setDetail(`Exported ${format.toUpperCase()} image.`)
+      }
+    } catch (error) {
+      setDetail(`Could not export ${format.toUpperCase()}: ${messageFromError(error)}`)
+    } finally {
+      exportingRef.current = false
+      setExporting(false)
+    }
+  }, [document.id])
+
   useEffect(() => {
     if (!command || command.version <= handledCommandVersionRef.current) {
       return
@@ -943,6 +980,8 @@ function DocumentEditor({
         void saveCurrent(false)
       } else if (command.type === 'save-as') {
         void saveCurrent(true)
+      } else if (command.type === 'export') {
+        void exportDrawing(command.format)
       } else if (command.type === 'reload') {
         void reload()
       } else if (command.type === 'fit-to-content') {
@@ -953,7 +992,7 @@ function DocumentEditor({
         changeCanvasBackground(command.color)
       }
     })
-  }, [changeCanvasBackground, command, editing, fitToContent, reload, saveCurrent])
+  }, [changeCanvasBackground, command, editing, exportDrawing, fitToContent, reload, saveCurrent])
 
   useEffect(() => {
     let canceled = false
@@ -2002,6 +2041,7 @@ export function App(): React.JSX.Element {
   const commandVersionRef = useRef(0)
   const metaRef = useRef(new Map<string, EditorMeta>())
   const menuRef = useRef<HTMLDivElement | null>(null)
+  const exportMenuRef = useRef<HTMLDivElement | null>(null)
   const [tabs, setTabs] = useState<TabEntry[]>([])
   const tabsRef = useRef<TabEntry[]>([])
   const [editorMeta, setEditorMeta] = useState<Record<string, EditorMeta>>({})
@@ -2020,6 +2060,7 @@ export function App(): React.JSX.Element {
   )
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [exportMenuOpen, setExportMenuOpen] = useState(false)
   const [editing, setEditing] = useState(false)
   const [systemTheme, setSystemTheme] = useState<Theme>(() =>
     window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
@@ -2143,6 +2184,7 @@ export function App(): React.JSX.Element {
       }
       const command = { ...action, version: ++commandVersionRef.current }
       setMenuOpen(false)
+      setExportMenuOpen(false)
       setCommands((current) => ({ ...current, [documentId]: command }))
       activateDocument(
         documentId,
@@ -2160,6 +2202,11 @@ export function App(): React.JSX.Element {
         void openDialog()
       } else if (command.type === 'open-path') {
         void openPath(command.path)
+      } else if (command.type === 'export') {
+        sendEditorCommand(command.documentId, {
+          type: 'export',
+          format: command.format
+        })
       } else {
         sendEditorCommand(command.documentId, { type: command.type })
       }
@@ -2251,6 +2298,29 @@ export function App(): React.JSX.Element {
       window.removeEventListener('keydown', onEscape)
     }
   }, [menuOpen])
+
+  useEffect(() => {
+    if (!exportMenuOpen) {
+      return
+    }
+    const dismiss = (event: PointerEvent): void => {
+      if (!exportMenuRef.current?.contains(event.target as Node)) {
+        setExportMenuOpen(false)
+      }
+    }
+    const onEscape = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        setExportMenuOpen(false)
+        exportMenuRef.current?.querySelector('button')?.focus()
+      }
+    }
+    window.addEventListener('pointerdown', dismiss)
+    window.addEventListener('keydown', onEscape)
+    return () => {
+      window.removeEventListener('pointerdown', dismiss)
+      window.removeEventListener('keydown', onEscape)
+    }
+  }, [exportMenuOpen])
   const checkForUpdates = useCallback(async (): Promise<void> => {
     setUpdatePhase('checking')
     setDetail(null)
@@ -2584,6 +2654,37 @@ export function App(): React.JSX.Element {
           >
             Give feedback
           </button>
+          <div className="workspace-overflow" ref={exportMenuRef}>
+            <button
+              type="button"
+              aria-label="Export drawing"
+              aria-expanded={exportMenuOpen}
+              aria-controls="export-menu"
+              disabled={!activeDocumentId || activeMeta?.exporting}
+              onClick={() => {
+                setMenuOpen(false)
+                setExportMenuOpen((open) => !open)
+              }}
+            >
+              Export ▾
+            </button>
+            {exportMenuOpen && (
+              <div className="workspace-menu" id="export-menu">
+                {(['svg', 'png', 'webp'] as const).map((format) => (
+                  <button
+                    key={format}
+                    type="button"
+                    disabled={!activeDocumentId || activeMeta?.exporting}
+                    onClick={() =>
+                      sendEditorCommand(activeDocumentId, { type: 'export', format })
+                    }
+                  >
+                    {format.toUpperCase()} {format === 'svg' ? '(vector)' : '(2× raster)'}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <button
             type="button"
             className="mode-button"
@@ -2600,7 +2701,10 @@ export function App(): React.JSX.Element {
               aria-label="More actions"
               aria-expanded={menuOpen}
               aria-controls="workspace-menu"
-              onClick={() => setMenuOpen((open) => !open)}
+              onClick={() => {
+                setExportMenuOpen(false)
+                setMenuOpen((open) => !open)
+              }}
             >
               ☰
             </button>

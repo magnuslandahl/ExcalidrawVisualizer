@@ -155,9 +155,14 @@ execute the emitted ESM preload bundle.
   into another secured application window; each window owns its own registry
   and dirty-close guard while sharing private feedback and dictation services.
 - A single compact top row contains flexible-width document tabs, the focused
-  save/watch status, **Give feedback**, View/Edit, and More actions. The full
+  save/watch status, **Give feedback**, Export, View/Edit, and More actions. The full
   filename/path is available on the tab tooltip; New, Open, Save, Fit, Reload,
   theme, canvas color (in Edit), version, and updates live in More actions.
+- Export renders the current canvas through Excalidraw's local SVG/PNG/WebP
+  utilities, then passes bounded image bytes through the typed preload to the
+  main-process save dialog and atomic writer. SVG is vector; PNG and WebP are
+  2× raster. Export does not write the `.excalidraw` file, save viewport state,
+  or include feedback overlays.
 - Drawings start in Excalidraw view mode. Edit explicitly restores the editing
   controls; giving feedback temporarily forces view mode even if Edit was active.
   Hide Excalidraw's empty toolbar wrapper in view mode, including split panes.

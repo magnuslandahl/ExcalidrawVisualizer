@@ -1,6 +1,7 @@
 import { Buffer } from 'node:buffer'
 import { spawn } from 'node:child_process'
 import {
+  mkdir,
   mkdtemp,
   readFile,
   realpath,
@@ -75,6 +76,7 @@ const tempRoot = await realpath(
 const scenePath = join(tempRoot, 'packaged-smoke.excalidraw')
 const secondScenePath = join(tempRoot, 'packaged-smoke-second.excalidraw')
 const profilePath = join(tempRoot, 'profile')
+await mkdir(profilePath)
 const debuggingPort = await getAvailablePort()
 const processOutput = []
 
@@ -127,6 +129,7 @@ const child = spawn(
   {
     env: {
       ...process.env,
+      EXCALIDRAW_VISUALIZER_SMOKE_TEST: '1',
       ELECTRON_ENABLE_LOGGING: 'true'
     },
     stdio: ['ignore', 'pipe', 'pipe']
@@ -271,7 +274,8 @@ const readRendererState = (connection) =>
       readyState: document.readyState,
       preloadBridge:
         typeof window.desktop?.openPath === 'function' &&
-        typeof window.desktop?.checkForUpdates === 'function',
+        typeof window.desktop?.checkForUpdates === 'function' &&
+        typeof window.desktop?.exportDrawing === 'function',
       appVersion: document.querySelector('.app-version')?.textContent?.trim() ?? '',
       updateLabel: document.querySelector('.update-button')?.textContent?.trim() ?? '',
       tabOverflowY: tabStrip ? getComputedStyle(tabStrip).overflowY : '',
@@ -336,13 +340,13 @@ try {
 
   await waitFor(
     () => connection.evaluate(
-      `Boolean(document.querySelector('.workspace-overflow > button'))`
+      `Boolean(document.querySelector('.workspace-overflow > button[aria-label="More actions"]'))`
     ),
     Boolean,
     'compact workspace bar'
   )
   await connection.evaluate(`(() => {
-    const button = document.querySelector('.workspace-overflow > button')
+    const button = document.querySelector('.workspace-overflow > button[aria-label="More actions"]')
     if (!(button instanceof HTMLButtonElement)) throw new Error('More actions is unavailable')
     button.click()
   })()`)
@@ -523,7 +527,87 @@ try {
   if (testRecordingSelection && (await readFile(secondScenePath, 'utf8')) !== feedbackTestScene) {
     throw new Error('Viewing or giving feedback changed the drawing file')
   }
+  await connection.evaluate(`(() => {
+    const targetName = ${JSON.stringify(basename(scenePath))}
+    const tab = [...document.querySelectorAll('.document-tab')]
+      .find((candidate) =>
+        candidate.querySelector('.document-tab__select span')?.textContent === targetName
+      )
+    const selectButton = tab?.querySelector('.document-tab__select')
+    if (!(selectButton instanceof HTMLButtonElement)) {
+      throw new Error('The empty drawing tab is unavailable')
+    }
+    selectButton.click()
+  })()`)
+  await waitFor(
+    () => readRendererState(connection),
+    (state) => state.documentPath === scenePath,
+    'the empty drawing to become active for export'
+  )
+  await connection.evaluate(`(() => {
+    const button = document.querySelector('[aria-label="Export drawing"]')
+    if (!(button instanceof HTMLButtonElement)) {
+      throw new Error('The Export control is unavailable')
+    }
+    button.click()
+  })()`)
+  const exportOptions = await waitFor(
+    () => connection.evaluate(
+      `[...document.querySelectorAll('#export-menu button')].map((choice) => choice.textContent?.trim())`
+    ),
+    (choices) => choices.join('|') === 'SVG (vector)|PNG (2× raster)|WEBP (2× raster)',
+    'SVG, PNG, and WebP export options'
+  )
+  await connection.evaluate(`(() => {
+    const option = document.querySelector('#export-menu button')
+    if (!(option instanceof HTMLButtonElement)) {
+      throw new Error('The SVG export action is unavailable')
+    }
+    option.click()
+  })()`)
+  await waitFor(
+    () => connection.evaluate(
+      `document.querySelector('.document-pane--active .banner')?.textContent?.trim() ?? ''`
+    ),
+    (message) => message.includes('Could not export SVG: There are no elements to export'),
+    'empty-scene export error without opening a save dialog'
+  )
+  const bridgeRejection = await connection.evaluate(`(async () => {
+    try {
+      await window.desktop.exportDrawing({
+        documentId: 'missing-document',
+        format: 'svg',
+        data: new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"/>')
+      })
+      return 'Unexpected export success'
+    } catch (error) {
+      return String(error)
+    }
+  })()`)
+  if (!bridgeRejection.includes('The requested document is not open')) {
+    throw new Error(`Export IPC failed to validate the document: ${bridgeRejection}`)
+  }
+  if ((await readFile(scenePath, 'utf8')) !== `${JSON.stringify(sceneWithBackground('#ffffff'), null, 2)}\n`) {
+    throw new Error('Exporting the empty scene changed its source file')
+  }
   if (testRecordingSelection) {
+    await connection.evaluate(`(() => {
+      const targetName = ${JSON.stringify(basename(secondScenePath))}
+      const tab = [...document.querySelectorAll('.document-tab')]
+        .find((candidate) =>
+          candidate.querySelector('.document-tab__select span')?.textContent === targetName
+        )
+      const selectButton = tab?.querySelector('.document-tab__select')
+      if (!(selectButton instanceof HTMLButtonElement)) {
+        throw new Error('The synthetic drawing tab is unavailable')
+      }
+      selectButton.click()
+    })()`)
+    await waitFor(
+      () => readRendererState(connection),
+      (state) => state.documentPath === secondScenePath,
+      'the synthetic drawing to become active after export'
+    )
     const pointer = await connection.evaluate(`(() => {
       const rect = document.querySelector('.editor-slot--active .canvas-shell')
         ?.getBoundingClientRect()
@@ -544,7 +628,7 @@ try {
 
   if (shouldCheckUpdates) {
     await connection.evaluate(`(() => {
-      const more = document.querySelector('.workspace-overflow > button')
+      const more = document.querySelector('.workspace-overflow > button[aria-label="More actions"]')
       if (!(more instanceof HTMLButtonElement)) {
         throw new Error('More actions is unavailable')
       }
@@ -624,7 +708,7 @@ try {
 
   await connection.evaluate(`(() => {
     const mode = document.querySelector('.mode-button')
-    const more = document.querySelector('.workspace-overflow > button')
+    const more = document.querySelector('.workspace-overflow > button[aria-label="More actions"]')
     if (!(mode instanceof HTMLButtonElement) || !(more instanceof HTMLButtonElement)) {
       throw new Error('View/Edit controls are unavailable')
     }
@@ -750,6 +834,9 @@ try {
           feedbackFocusState.automaticContext.includes('Whole drawing') &&
           feedbackFocusState.targetButtonCount === 0,
         recordingElementSelection: testRecordingSelection ? true : 'not-tested',
+        exportFormats: exportOptions.length,
+        emptyExportRejected: true,
+        exportBridgeValidated: true,
         compactBarHeight: initialState.barHeight,
         wideTabs: initialState.tabs.every((tab) => tab.width > 260),
         viewerDefault: initialState.editAction === 'Edit',
