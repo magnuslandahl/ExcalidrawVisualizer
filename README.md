@@ -51,6 +51,9 @@ The packages are currently unsigned for distribution.
 - Native open, save, save-as, reload, recent-files, drag-and-drop, and keyboard shortcuts
 - Multiple mounted document tabs with independent viewport, undo, autosave, watcher,
   conflict, and dirty state
+- A single compact tab/action row with flexible filename widths, explicit
+  **View/Edit** control, and an overflow menu for less-used actions; drawings
+  open in viewing mode
 - Drag a tab into a side-by-side pane, or move a saved clean tab into another secured
   application window from its context menu
 - Launch-path handling, single-instance forwarding, and packaged `.excalidraw` association
@@ -62,7 +65,7 @@ The packages are currently unsigned for distribution.
 - Embedded image/file-map preservation and merging
 - Explicit Fit to Content without resetting the viewport on normal external updates
 - System, light, and dark application themes with a remembered preference
-- Running version and an explicit, checksum-verified update control in the toolbar
+- Running version and an explicit, checksum-verified update control in the overflow menu
 - Arbitrary canvas background colors saved as normal Excalidraw document state
 - Standard Excalidraw stroke and fill palettes whenever an element is selected
 - A canvas-first **Give feedback** mode that hides application chrome, enters
@@ -77,11 +80,12 @@ The packages are currently unsigned for distribution.
 
 ## Local feedback and GitHub Copilot pairing
 
-Open **Give feedback** on a drawing. Visualizer temporarily hides its header, tabs,
-and document toolbar and asks Excalidraw to use zen mode so the canvas stays visible.
+Open **Give feedback** on a drawing from the tab row. Visualizer temporarily hides
+the tab/action row and asks Excalidraw to use zen mode so the canvas stays visible.
 Start dictating and interact naturally with the drawing. Visualizer samples pointer
-movement and hovered element IDs and records click order and relative timing. Clicked
-elements become the feedback target automatically; if nothing is clicked, the target
+movement and hovered element IDs and records click order and relative timing even
+while the viewing canvas pans. Clicked elements become the feedback target
+automatically; if nothing is clicked, the target
 remains the whole drawing. No target picker is required. **Copy for agent** puts a
 revision-labelled text submission on the clipboard, so the local workflow also works
 without pairing an agent.
@@ -258,11 +262,20 @@ with no pending edits to move it into another secured application window.
 
 ## Colors and appearance
 
-The header contains two appearance controls:
+Drawings open in **View** mode for panning, zooming, and feedback without editing.
+Choose **Edit** in the tab row to reveal Excalidraw's editing controls; choose
+**View** to return to the viewing layout. This mode is local to the window and
+does not change the drawing. The tab row shows status for the focused drawing;
+hover a tab for its full path. **More actions** contains New, Open, Save,
+Save As, Fit to Content, Reload, theme, the update control, and app version.
+The native File/Edit/View menu and shortcuts remain available.
+
+The overflow menu contains two appearance controls:
 
 - **Theme** changes the application and Excalidraw UI between System, Light, and Dark.
   This preference is local to the application and does not modify the drawing.
-- **Canvas** opens the system color picker for the current drawing background. The chosen
+- **Canvas** appears in Edit mode and opens the system color picker for the
+  current drawing background. The chosen
   value is saved as `appState.viewBackgroundColor` in the `.excalidraw` file, so it remains
   compatible with excalidraw.com and other Excalidraw editors.
 

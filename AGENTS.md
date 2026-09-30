@@ -154,10 +154,15 @@ execute the emitted ESM preload bundle.
 - Tabs can be arranged in a side-by-side pane. A saved clean tab can be moved
   into another secured application window; each window owns its own registry
   and dirty-close guard while sharing private feedback and dictation services.
-- The application header contains theme, New, and Open controls. Each document
-  toolbar shows its file, save/watch status, **Give feedback**, canvas color,
-  Fit to Content, and Reload controls.
-- The application header shows the running version and an explicit update
+- A single compact top row contains flexible-width document tabs, the focused
+  save/watch status, **Give feedback**, View/Edit, and More actions. The full
+  filename/path is available on the tab tooltip; New, Open, Save, Fit, Reload,
+  theme, canvas color (in Edit), version, and updates live in More actions.
+- Drawings start in Excalidraw view mode. Edit explicitly restores the editing
+  controls; giving feedback temporarily forces view mode even if Edit was active.
+  Hide Excalidraw's empty toolbar wrapper in view mode, including split panes.
+  Mode is local to the window and is not saved in the drawing.
+- The More actions menu shows the running version and an explicit update
   control. It does not contact GitHub until clicked. A current build reports
   `No update available`; a newer Windows/macOS package is downloaded, verified
   against `SHA256SUMS.txt`, and installed or opened as appropriate.
@@ -165,9 +170,9 @@ execute the emitted ESM preload bundle.
   locally.
 - Canvas background color is document state and is saved in the
   `.excalidraw` file.
-- Selecting an element exposes Excalidraw's normal stroke and fill color
-  controls. The main Excalidraw menu also retains its canvas background and
-  theme actions.
+- In Edit mode, selecting an element exposes Excalidraw's normal stroke and
+  fill color controls. The main Excalidraw menu retains its canvas background
+  and theme actions.
 - Autosave is debounced. `Saved` is shown only after the main process confirms
   a successful write.
 - Errors and watcher states are visible; malformed external content never
@@ -176,8 +181,9 @@ execute the emitted ESM preload bundle.
 - Give feedback is canvas-first: while it is open, application chrome is hidden
   and Excalidraw uses zen mode; while dictating, the panel collapses to a compact
   recorder. Bounded pointer movement, hovered element IDs, click order, and
-  relative timing are captured automatically. Clicked elements accumulate into
-  one target, defaulting to the whole drawing when nothing is clicked.
+  relative timing are captured from the canvas during pointer capture (including
+  view-mode panning). Clicked elements accumulate into one target, defaulting
+  to the whole drawing when nothing is clicked.
 - A paired recording ends with one Send feedback action that stops capture,
   transcribes locally, immediately delivers the immutable message, resets the
   composer, and leaves it ready for another recording. Its overlays and
@@ -198,11 +204,11 @@ execute the emitted ESM preload bundle.
   Typed text survives permission denial, cancellation, silence, or engine
   failure.
 
-The application layout uses explicit CSS grid rows for the header, tabs,
-optional global banner, and workspace. Each document pane explicitly places its
-toolbar, optional banner, and canvas. Do not return to implicit placement: when
-a banner is absent, implicit placement can put the workspace in a zero-height
-`auto` row and render the Excalidraw canvas blank.
+The application layout uses explicit CSS grid rows for the compact tab/action
+row, optional global banner, and workspace. Each document pane explicitly
+places its optional banner and canvas. Do not return to implicit placement:
+when a banner is absent, implicit placement can put the workspace in a
+zero-height `auto` row and render the Excalidraw canvas blank.
 
 ## Architecture
 
@@ -327,6 +333,8 @@ main handler, validation, and tests together.
 - drag and drop, commands, banners, and conflict actions
 - canvas-first scene-coordinate pointer/hover/click capture and current-target
   overlays outside scene state
+- controlled viewer-first Excalidraw mode and canvas pointer capture during
+  feedback (onPointerUpdate can miss clicks once view mode starts panning)
 - persisted immutable feedback composition and clipboard recovery without a
   saved-feedback management surface
 - explicit task pairing, queue/send-now controls, honest receipt/reply history,
@@ -481,10 +489,11 @@ Use temporary directories and observable events for watcher tests. Do not add
 fixed sleeps as the assertion mechanism.
 
 The Windows packaged smoke uses a fake microphone and a synthetic shape to
-assert that selecting an element while dictating updates feedback context
-without unmounting the renderer. Excalidraw emits `onChange` after prop
-updates, so recording target updates must be idempotent to prevent a
-renderer-crashing update loop.
+assert that clicking an element in view mode while dictating updates feedback
+context without unmounting the renderer or changing the drawing. It also checks
+that the compact bar has wide tabs and that Edit exposes the background control.
+Excalidraw emits `onChange` after prop updates, so recording target updates
+must be idempotent to prevent a renderer-crashing update loop.
 
 The macOS package smoke test (`npm run smoke:mac -- <app-path>`) verifies:
 
@@ -621,6 +630,7 @@ Implemented:
 - public repository, protected `main`, rolling `latest`, and permanent `v0.1.0`
 - per-document tabs and controllers with canonical path ownership and Save As
   copy semantics
+- a compact viewer-first workspace with explicit Edit and a single tab/action row
 - canvas-first anchored feedback capture, atomic private persistence, immutable
   clipboard submissions, and direct Copilot delivery
 - bundled local English/Swedish dictation with pinned model/VAD inputs,

@@ -83,9 +83,7 @@ await writeFile(
   `${JSON.stringify(sceneWithBackground('#ffffff'), null, 2)}\n`,
   'utf8'
 )
-await writeFile(
-  secondScenePath,
-  `${JSON.stringify(sceneWithBackground('#fff4e6', [{
+const feedbackTestScene = `${JSON.stringify(sceneWithBackground('#fff4e6', [{
     id: 'feedback-test-rectangle',
     type: 'rectangle',
     x: 200,
@@ -112,9 +110,8 @@ await writeFile(
     updated: 1,
     link: null,
     locked: false
-  }]), null, 2)}\n`,
-  'utf8'
-)
+  }]), null, 2)}\n`
+await writeFile(secondScenePath, feedbackTestScene, 'utf8')
 
 const child = spawn(
   executablePath,
@@ -259,13 +256,17 @@ const readRendererState = (connection) =>
     }
     const activeEditors = [...document.querySelectorAll('.editor-slot--active')]
     const targetPath = ${JSON.stringify(scenePath)}
+    const pathForEditor = (editor) =>
+      document.querySelector(
+        '.document-tab[data-document-id="' + editor.dataset.documentId +
+        '"] .document-tab__select'
+      )?.getAttribute('title') ?? ''
     const targetEditor =
-      activeEditors.find(
-        (editor) =>
-          editor.querySelector('.document-identity span')?.getAttribute('title') ===
-          targetPath
-      ) ?? activeEditors[0] ?? null
+      activeEditors.find((editor) => pathForEditor(editor) === targetPath) ??
+      activeEditors[0] ?? null
     const tabStrip = document.querySelector('.document-tab-strip')
+    const bar = document.querySelector('.workspace-bar')
+    const toolbar = targetEditor?.querySelector('.App-toolbar')
     return {
       readyState: document.readyState,
       preloadBridge:
@@ -274,20 +275,25 @@ const readRendererState = (connection) =>
       appVersion: document.querySelector('.app-version')?.textContent?.trim() ?? '',
       updateLabel: document.querySelector('.update-button')?.textContent?.trim() ?? '',
       tabOverflowY: tabStrip ? getComputedStyle(tabStrip).overflowY : '',
-      documentName:
-        targetEditor?.querySelector('.document-identity strong')?.textContent ?? '',
-      documentPath:
-        targetEditor?.querySelector('.document-identity span')?.getAttribute('title') ?? '',
-      status: targetEditor?.querySelector('.status')?.textContent?.trim() ?? '',
+      documentPath: targetEditor ? pathForEditor(targetEditor) : '',
+      status: document.querySelector('.workspace-actions > .status')?.textContent?.trim() ?? '',
+      barHeight: bar?.getBoundingClientRect().height ?? 0,
+      editAction: document.querySelector('.mode-button')?.textContent?.trim() ?? '',
+      toolbarVisible: toolbar
+        ? getComputedStyle(toolbar).display !== 'none' &&
+          toolbar.getBoundingClientRect().height > 0
+        : false,
+      toolbarLabels: [...(toolbar?.querySelectorAll('[aria-label]') ?? [])]
+        .map((element) => element.getAttribute('aria-label')).slice(0, 16),
+      oldToolbarCount: document.querySelectorAll('.document-toolbar').length,
       tabs: [...document.querySelectorAll('.document-tab')].map((tab) => ({
         name: tab.querySelector('.document-tab__select span')?.textContent ?? '',
-        selected: tab.classList.contains('document-tab--active')
+        selected: tab.classList.contains('document-tab--active'),
+        width: tab.getBoundingClientRect().width
       })),
       split: document.querySelector('.workspace')?.classList.contains('workspace--split') ?? false,
       visibleEditors: activeEditors.map((editor) => ({
-        documentPath:
-          editor.querySelector('.document-identity span')?.getAttribute('title') ?? '',
-        canvasBackground: editor.querySelector('input[type="color"]')?.value ?? '',
+        documentPath: pathForEditor(editor),
         shell: rect(editor.querySelector('.canvas-shell')),
         canvases: [...editor.querySelectorAll('canvas')].map(rect)
       })),
@@ -297,7 +303,7 @@ const readRendererState = (connection) =>
         ...(targetEditor?.querySelectorAll('.canvas-shell canvas') ?? [])
       ].map(rect),
       canvasBackground:
-        targetEditor?.querySelector('input[type="color"]')?.value ?? '',
+        document.querySelector('.workspace-menu input[type="color"]')?.value ?? '',
       resources: performance.getEntriesByType('resource').map((entry) => entry.name)
     }
   })()`)
@@ -328,16 +334,33 @@ try {
     connection.send('Network.enable')
   ])
 
+  await waitFor(
+    () => connection.evaluate(
+      `Boolean(document.querySelector('.workspace-overflow > button'))`
+    ),
+    Boolean,
+    'compact workspace bar'
+  )
+  await connection.evaluate(`(() => {
+    const button = document.querySelector('.workspace-overflow > button')
+    if (!(button instanceof HTMLButtonElement)) throw new Error('More actions is unavailable')
+    button.click()
+  })()`)
   const initialState = await waitFor(
     () => readRendererState(connection),
     (state) =>
       state.readyState === 'complete' &&
       state.preloadBridge &&
-      /^\d+\.\d+\.\d+/.test(state.appVersion) &&
+      /\d+\.\d+\.\d+/.test(state.appVersion) &&
       state.updateLabel === 'Check for updates' &&
       state.tabOverflowY === 'hidden' &&
+      state.barHeight > 0 && state.barHeight <= 48 &&
+      state.oldToolbarCount === 0 &&
+      state.editAction === 'Edit' &&
+      !state.toolbarVisible &&
       [scenePath, secondScenePath].includes(state.documentPath) &&
       state.tabs.length === 2 &&
+      state.tabs.every((tab) => tab.width > 260) &&
       state.tabs.some((tab) => tab.name === basename(scenePath)) &&
       state.tabs.some((tab) => tab.name === basename(secondScenePath)) &&
       state.workspace?.width > 0 &&
@@ -372,7 +395,7 @@ try {
   }
 
   await connection.evaluate(`(() => {
-    const button = [...document.querySelectorAll('.editor-slot--active .document-toolbar button')]
+    const button = [...document.querySelectorAll('.workspace-actions button')]
       .find((candidate) => candidate.textContent?.trim() === 'Give feedback')
     if (!(button instanceof HTMLButtonElement)) {
       throw new Error('The Give feedback control is unavailable')
@@ -387,14 +410,8 @@ try {
         const canvas = document.querySelector('.editor-slot--active .canvas-shell')
         return {
           active: app?.classList.contains('app--feedback-active') ?? false,
-          appHeaderHidden:
-            getComputedStyle(document.querySelector('.app-header')).display === 'none',
-          tabsHidden:
-            getComputedStyle(document.querySelector('.document-tabs')).display === 'none',
-          toolbarHidden:
-            getComputedStyle(
-              document.querySelector('.editor-slot--active .document-toolbar')
-            ).display === 'none',
+          barHidden:
+            getComputedStyle(document.querySelector('.workspace-bar')).display === 'none',
           panelWidth: panel?.getBoundingClientRect().width ?? 0,
           canvasHeight: canvas?.getBoundingClientRect().height ?? 0,
           automaticContext:
@@ -408,9 +425,7 @@ try {
       })()`),
     (state) =>
       state.active &&
-      state.appHeaderHidden &&
-      state.tabsHidden &&
-      state.toolbarHidden &&
+      state.barHidden &&
       state.panelWidth > 0 &&
       state.panelWidth <= 342 &&
       state.canvasHeight > (initialState.canvasShell?.height ?? 0) &&
@@ -442,6 +457,16 @@ try {
       return { x: rect.left + 270, y: rect.top + 245 }
     })()`)
     await connection.send('Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      x: pointer.x - 90,
+      y: pointer.y - 40
+    })
+    await connection.send('Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      x: pointer.x,
+      y: pointer.y
+    })
+    await connection.send('Input.dispatchMouseEvent', {
       type: 'mousePressed',
       x: pointer.x,
       y: pointer.y,
@@ -461,7 +486,7 @@ try {
       ),
       (context) =>
         context.includes('1 selected element') &&
-        context.includes('1 interaction'),
+        Number(context.match(/(\d+) interactions?/)?.[1] ?? 0) >= 2,
       'selected element feedback context during recording'
     )
     await connection.evaluate(`(() => {
@@ -495,9 +520,35 @@ try {
     Boolean,
     'feedback mode to close'
   )
+  if (testRecordingSelection && (await readFile(secondScenePath, 'utf8')) !== feedbackTestScene) {
+    throw new Error('Viewing or giving feedback changed the drawing file')
+  }
+  if (testRecordingSelection) {
+    const pointer = await connection.evaluate(`(() => {
+      const rect = document.querySelector('.editor-slot--active .canvas-shell')
+        ?.getBoundingClientRect()
+      if (!rect) throw new Error('Viewing canvas is unavailable')
+      return { x: rect.left + 270, y: rect.top + 245 }
+    })()`)
+    await connection.send('Input.dispatchMouseEvent', {
+      type: 'mousePressed', x: pointer.x, y: pointer.y, button: 'left', clickCount: 1
+    })
+    await connection.send('Input.dispatchMouseEvent', {
+      type: 'mouseMoved', x: pointer.x + 50, y: pointer.y + 30, button: 'left'
+    })
+    await connection.send('Input.dispatchMouseEvent', {
+      type: 'mouseReleased', x: pointer.x + 50, y: pointer.y + 30, button: 'left',
+      clickCount: 1
+    })
+  }
 
   if (shouldCheckUpdates) {
     await connection.evaluate(`(() => {
+      const more = document.querySelector('.workspace-overflow > button')
+      if (!(more instanceof HTMLButtonElement)) {
+        throw new Error('More actions is unavailable')
+      }
+      more.click()
       const button = document.querySelector('.update-button')
       if (!(button instanceof HTMLButtonElement)) {
         throw new Error('The update control is unavailable')
@@ -545,7 +596,7 @@ try {
     'the side-view context-menu command'
   )
 
-  await waitFor(
+  const splitState = await waitFor(
     () => readRendererState(connection),
     (state) =>
       state.split &&
@@ -557,7 +608,9 @@ try {
           editor.canvases.filter(
             (canvas) => canvas?.width > 0 && canvas?.height > 0
           ).length >= 2
-      ),
+      ) &&
+      state.editAction === 'Edit' &&
+      !state.toolbarVisible,
     'two visible drawing panes with non-zero canvas layers'
   )
 
@@ -569,22 +622,27 @@ try {
   )
   await rename(replacementPath, scenePath)
 
-  await waitFor(
+  await connection.evaluate(`(() => {
+    const mode = document.querySelector('.mode-button')
+    const more = document.querySelector('.workspace-overflow > button')
+    if (!(mode instanceof HTMLButtonElement) || !(more instanceof HTMLButtonElement)) {
+      throw new Error('View/Edit controls are unavailable')
+    }
+    mode.click()
+    more.click()
+  })()`)
+  const editModeState = await waitFor(
     () => readRendererState(connection),
     (state) =>
       state.documentPath === scenePath &&
+      state.editAction === 'View' &&
+      state.toolbarVisible &&
+      state.toolbarLabels.includes('Rectangle') &&
       state.canvasBackground === '#f0e8ff',
-    'the external update routed to its drawing tab'
+    'the external update and editing mode background control'
   )
-
   await connection.evaluate(`(() => {
-    const targetPath = ${JSON.stringify(scenePath)}
-    const targetEditor = [...document.querySelectorAll('.editor-slot--active')].find(
-      (editor) =>
-        editor.querySelector('.document-identity span')?.getAttribute('title') ===
-        targetPath
-    )
-    const input = targetEditor?.querySelector('input[type="color"]')
+    const input = document.querySelector('.workspace-menu input[type="color"]')
     if (!(input instanceof HTMLInputElement)) {
       throw new Error('Canvas background input is unavailable')
     }
@@ -673,6 +731,9 @@ try {
       `Packaged renderer reported errors: ${JSON.stringify(protocolErrors)}`
     )
   }
+  if (testRecordingSelection && (await readFile(secondScenePath, 'utf8')) !== feedbackTestScene) {
+    throw new Error('Dragging in view mode modified the drawing')
+  }
 
   console.log(
     JSON.stringify(
@@ -680,18 +741,21 @@ try {
         package: packagePath,
         architecture: process.arch,
         preloadBridge: true,
-        appVersion: finalState.appVersion,
-        updateControl: finalState.updateLabel,
+        appVersion: initialState.appVersion,
+        updateControl: initialState.updateLabel,
         manualUpdateCheck: manualUpdateState,
-        feedbackCanvasFocus:
-          feedbackFocusState.appHeaderHidden &&
-          feedbackFocusState.tabsHidden &&
-          feedbackFocusState.toolbarHidden,
+        feedbackCanvasFocus: feedbackFocusState.barHidden,
         feedbackPanelWidth: feedbackFocusState.panelWidth,
         automaticFeedbackContext:
           feedbackFocusState.automaticContext.includes('Whole drawing') &&
           feedbackFocusState.targetButtonCount === 0,
         recordingElementSelection: testRecordingSelection ? true : 'not-tested',
+        compactBarHeight: initialState.barHeight,
+        wideTabs: initialState.tabs.every((tab) => tab.width > 260),
+        viewerDefault: initialState.editAction === 'Edit',
+        viewerToolbarHidden: !initialState.toolbarVisible,
+        splitViewerToolbarHidden: !splitState.toolbarVisible,
+        editToolbarVisible: editModeState.toolbarVisible,
         tabOverflowHidden: finalState.tabOverflowY === 'hidden',
         launchPathTabs: initialState.tabs.length,
         canvasLayers: initialState.canvases.length,
