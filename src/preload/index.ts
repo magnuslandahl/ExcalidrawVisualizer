@@ -6,6 +6,7 @@ import {
   type DictationRequest,
   type DictationResult,
   type DocumentEvent,
+  type ExportRequest,
   type SaveRequest,
   type SaveResult
 } from '../shared/contracts'
@@ -25,6 +26,8 @@ const api: DesktopApi = {
     ipcRenderer.invoke(ipcChannels.save, request) as Promise<SaveResult>,
   saveAs: (request: SaveRequest) =>
     ipcRenderer.invoke(ipcChannels.saveAs, request) as Promise<SaveResult>,
+  exportDrawing: (request: ExportRequest) =>
+    ipcRenderer.invoke(ipcChannels.exportDrawing, request) as Promise<boolean>,
   reload: (documentId) =>
     ipcRenderer.invoke(ipcChannels.reload, documentId) as Promise<boolean>,
   closeDocument: (documentId) =>

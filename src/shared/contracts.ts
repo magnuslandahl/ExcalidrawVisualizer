@@ -21,6 +21,7 @@ export const ipcChannels = {
   openPath: 'document:open-path',
   save: 'document:save',
   saveAs: 'document:save-as',
+  exportDrawing: 'document:export',
   reload: 'document:reload',
   closeDocument: 'document:close',
   openInNewWindow: 'document:open-in-new-window',
@@ -108,12 +109,21 @@ export type AppCommand =
   | { type: 'open-path'; path: string }
   | { type: 'save'; documentId: string | null }
   | { type: 'save-as'; documentId: string | null }
+  | { type: 'export'; documentId: string | null; format: ExportFormat }
   | { type: 'reload'; documentId: string | null }
   | { type: 'fit-to-content'; documentId: string | null }
 
 export type SaveRequest = {
   documentId: string
   scene: ExcalidrawScene
+}
+
+export type ExportFormat = 'svg' | 'png' | 'webp'
+
+export type ExportRequest = {
+  documentId: string
+  format: ExportFormat
+  data: Uint8Array
 }
 
 export type SaveResult =
@@ -163,6 +173,7 @@ export type DesktopApi = {
   openPath(path: string): Promise<boolean>
   save(request: SaveRequest): Promise<SaveResult>
   saveAs(request: SaveRequest): Promise<SaveResult>
+  exportDrawing(request: ExportRequest): Promise<boolean>
   reload(documentId: string): Promise<boolean>
   closeDocument(documentId: string): Promise<boolean>
   openInNewWindow(documentId: string): Promise<void>

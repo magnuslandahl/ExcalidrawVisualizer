@@ -1,9 +1,10 @@
-import { basename, join, resolve } from 'node:path'
+import { basename, isAbsolute, join, resolve } from 'node:path'
 import { app, BrowserWindow, clipboard, dialog, ipcMain, session } from 'electron'
 import { DictationService } from './dictation-service'
 import { AgentFeedbackService } from './agent-feedback-service'
 import { CopilotCompanionInstaller } from './copilot-companion-installer'
 import { DocumentRegistry } from './document-registry'
+import { exportImage } from './export-image'
 import { FeedbackStore } from './feedback-store'
 import { feedbackDocumentStorageKey } from './feedback-document'
 import { installApplicationMenu } from './menu'
@@ -399,6 +400,10 @@ const registerIpc = (): void => {
     )
     return result.ok && warning ? { ...result, warning } : result
   })
+  ipcMain.handle(ipcChannels.exportDrawing, (event, request: unknown) => {
+    const context = requireWindowContext(event.sender)
+    return exportImage(context.window, context.registry, request)
+  })
   ipcMain.handle(ipcChannels.reload, (event, documentId: unknown) =>
     requireWindowContext(event.sender).registry.reload(
       requireDocumentId(documentId)
@@ -761,8 +766,14 @@ const initialize = async (): Promise<void> => {
   refreshApplicationMenu()
 }
 
-if (process.env.EXCALIDRAW_VISUALIZER_SMOKE_TEST === '1') {
+const smokeTest = process.env.EXCALIDRAW_VISUALIZER_SMOKE_TEST === '1'
+if (smokeTest) {
   app.setName(`${app.getName()} Smoke Test`)
+  const testProfile = app.commandLine.getSwitchValue('user-data-dir')
+  if (!isAbsolute(testProfile)) {
+    throw new Error('Packaged smoke test requires an isolated profile')
+  }
+  app.setPath('userData', testProfile)
 }
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock()

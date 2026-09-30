@@ -19,6 +19,7 @@
     "vitest.config.ts",
     "src/main/**/*.ts",
     "src/preload/**/*.ts",
+    "src/renderer/src/export-image.ts",
     "src/shared/**/*.ts",
     "tests/**/*.ts"
   ]
