@@ -480,6 +480,12 @@ The focused Vitest suite currently covers:
 Use temporary directories and observable events for watcher tests. Do not add
 fixed sleeps as the assertion mechanism.
 
+The Windows packaged smoke uses a fake microphone and a synthetic shape to
+assert that selecting an element while dictating updates feedback context
+without unmounting the renderer. Excalidraw emits `onChange` after prop
+updates, so recording target updates must be idempotent to prevent a
+renderer-crashing update loop.
+
 The macOS package smoke test (`npm run smoke:mac -- <app-path>`) verifies:
 
 - a real window appears
