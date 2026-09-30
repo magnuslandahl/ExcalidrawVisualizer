@@ -15,6 +15,7 @@ import { basename, join, resolve } from 'node:path'
 
 const packagePathArgument = process.argv[2]
 const shouldCheckUpdates = process.argv.includes('--check-update')
+const testRecordingSelection = process.platform === 'win32'
 const WebSocketClient = globalThis.WebSocket
 
 if (!packagePathArgument) {
@@ -57,11 +58,11 @@ const getAvailablePort = async () =>
     })
   })
 
-const sceneWithBackground = (viewBackgroundColor) => ({
+const sceneWithBackground = (viewBackgroundColor, elements = []) => ({
   type: 'excalidraw',
   version: 2,
   source: 'excalidraw-visualizer-packaged-smoke-test',
-  elements: [],
+  elements,
   appState: {
     viewBackgroundColor
   },
@@ -84,7 +85,34 @@ await writeFile(
 )
 await writeFile(
   secondScenePath,
-  `${JSON.stringify(sceneWithBackground('#fff4e6'), null, 2)}\n`,
+  `${JSON.stringify(sceneWithBackground('#fff4e6', [{
+    id: 'feedback-test-rectangle',
+    type: 'rectangle',
+    x: 200,
+    y: 200,
+    width: 140,
+    height: 100,
+    angle: 0,
+    strokeColor: '#1e1e1e',
+    backgroundColor: '#ffec99',
+    fillStyle: 'solid',
+    strokeWidth: 2,
+    strokeStyle: 'solid',
+    roughness: 1,
+    opacity: 100,
+    groupIds: [],
+    frameId: null,
+    index: 'a0',
+    roundness: null,
+    seed: 1,
+    version: 1,
+    versionNonce: 101,
+    isDeleted: false,
+    boundElements: null,
+    updated: 1,
+    link: null,
+    locked: false
+  }]), null, 2)}\n`,
   'utf8'
 )
 
@@ -93,6 +121,9 @@ const child = spawn(
   [
     `--remote-debugging-port=${debuggingPort}`,
     `--user-data-dir=${profilePath}`,
+    ...(testRecordingSelection
+      ? ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream']
+      : []),
     scenePath,
     secondScenePath
   ],
@@ -320,6 +351,26 @@ try {
     'both launch-path tabs and non-zero canvas layers'
   )
 
+  if (testRecordingSelection) {
+    await connection.evaluate(`(() => {
+      const targetName = ${JSON.stringify(basename(secondScenePath))}
+      const tab = [...document.querySelectorAll('.document-tab')]
+        .find((candidate) =>
+          candidate.querySelector('.document-tab__select span')?.textContent === targetName
+        )
+      const selectButton = tab?.querySelector('.document-tab__select')
+      if (!(selectButton instanceof HTMLButtonElement)) {
+        throw new Error('The synthetic drawing tab is unavailable')
+      }
+      selectButton.click()
+    })()`)
+    await waitFor(
+      () => readRendererState(connection),
+      (state) => state.documentPath === secondScenePath,
+      'synthetic feedback drawing to become active'
+    )
+  }
+
   await connection.evaluate(`(() => {
     const button = [...document.querySelectorAll('.editor-slot--active .document-toolbar button')]
       .find((candidate) => candidate.textContent?.trim() === 'Give feedback')
@@ -368,6 +419,67 @@ try {
       state.targetButtonCount === 0,
     'canvas-first feedback mode'
   )
+  if (testRecordingSelection) {
+    await connection.evaluate(`(() => {
+      const button = [...document.querySelectorAll('.feedback-panel button')]
+        .find((candidate) => candidate.textContent?.trim() === 'Start dictating')
+      if (!(button instanceof HTMLButtonElement)) {
+        throw new Error('The Start dictating control is unavailable')
+      }
+      button.click()
+    })()`)
+    await waitFor(
+      () => connection.evaluate(
+        `document.querySelector('.feedback-panel h2')?.textContent?.trim() ?? ''`
+      ),
+      (heading) => heading === 'Recording feedback',
+      'fake microphone recording'
+    )
+    const pointer = await connection.evaluate(`(() => {
+      const rect = document.querySelector('.editor-slot--active .canvas-shell')
+        ?.getBoundingClientRect()
+      if (!rect) throw new Error('Feedback canvas is unavailable')
+      return { x: rect.left + 270, y: rect.top + 245 }
+    })()`)
+    await connection.send('Input.dispatchMouseEvent', {
+      type: 'mousePressed',
+      x: pointer.x,
+      y: pointer.y,
+      button: 'left',
+      clickCount: 1
+    })
+    await connection.send('Input.dispatchMouseEvent', {
+      type: 'mouseReleased',
+      x: pointer.x,
+      y: pointer.y,
+      button: 'left',
+      clickCount: 1
+    })
+    await waitFor(
+      () => connection.evaluate(
+        `document.querySelector('.feedback-auto-context')?.textContent?.trim() ?? ''`
+      ),
+      (context) =>
+        context.includes('1 selected element') &&
+        context.includes('1 interaction'),
+      'selected element feedback context during recording'
+    )
+    await connection.evaluate(`(() => {
+      const button = [...document.querySelectorAll('.feedback-panel button')]
+        .find((candidate) => candidate.textContent?.trim() === 'Stop without transcript')
+      if (!(button instanceof HTMLButtonElement)) {
+        throw new Error('The cancel recording control is unavailable')
+      }
+      button.click()
+    })()`)
+    await waitFor(
+      () => connection.evaluate(
+        `document.querySelector('.feedback-panel h2')?.textContent?.trim() ?? ''`
+      ),
+      (heading) => heading === 'Give feedback',
+      'recording cancellation'
+    )
+  }
   await connection.evaluate(`(() => {
     const button = document.querySelector('.feedback-panel > header > button')
     if (!(button instanceof HTMLButtonElement)) {
@@ -579,6 +691,7 @@ try {
         automaticFeedbackContext:
           feedbackFocusState.automaticContext.includes('Whole drawing') &&
           feedbackFocusState.targetButtonCount === 0,
+        recordingElementSelection: testRecordingSelection ? true : 'not-tested',
         tabOverflowHidden: finalState.tabOverflowY === 'hidden',
         launchPathTabs: initialState.tabs.length,
         canvasLayers: initialState.canvases.length,

@@ -321,6 +321,18 @@ const elementIdsAtPoint = (
 const sameIds = (left: readonly string[], right: readonly string[]): boolean =>
   left.length === right.length && left.every((id, index) => id === right[index])
 
+// Excalidraw calls onChange after prop updates, so repeated targets must not trigger a new render.
+const sameElementFeedbackTarget = (
+  current: FeedbackTarget,
+  next: Extract<FeedbackTarget, { type: 'elements' }>
+): boolean =>
+  current.type === 'elements' &&
+  sameIds(current.elementIds, next.elementIds) &&
+  current.originalBounds.x === next.originalBounds.x &&
+  current.originalBounds.y === next.originalBounds.y &&
+  current.originalBounds.width === next.originalBounds.width &&
+  current.originalBounds.height === next.originalBounds.height
+
 function DocumentEditor({
   document,
   event,
@@ -904,7 +916,9 @@ function DocumentEditor({
           recordingTargetIdsRef.current
         )
         if (target) {
-          setDraftTarget(target)
+          setDraftTarget((current) =>
+            sameElementFeedbackTarget(current, target) ? current : target
+          )
         }
       }
       const scene = toScene(elements, appState, files)
@@ -1226,7 +1240,9 @@ function DocumentEditor({
         recordingTargetIdsRef.current
       )
       if (target) {
-        setDraftTarget(target)
+        setDraftTarget((current) =>
+          sameElementFeedbackTarget(current, target) ? current : target
+        )
       }
     }
   }, [])
