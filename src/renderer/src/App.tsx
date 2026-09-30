@@ -2,7 +2,8 @@ import {
   CaptureUpdateAction,
   Excalidraw,
   restore,
-  serializeAsJSON
+  serializeAsJSON,
+  viewportCoordsToSceneCoords
 } from '@excalidraw/excalidraw'
 import type {
   AppState,
@@ -83,15 +84,17 @@ type EditorMeta = {
   path: string | null
   status: DocumentStatus
   dirty: boolean
+  canvasBackground: string
   feedbackCount: number
   feedbackLoaded: boolean
   feedbackActive: boolean
 }
 
-type EditorCommand = {
-  version: number
-  type: 'save' | 'save-as' | 'reload' | 'fit-to-content'
-}
+type EditorCommandAction =
+  | { type: 'save' | 'save-as' | 'reload' | 'fit-to-content' | 'open-feedback' }
+  | { type: 'canvas-background'; color: string }
+
+type EditorCommand = EditorCommandAction & { version: number }
 
 type DocumentEditorProps = {
   document: OpenedDocument
@@ -100,6 +103,7 @@ type DocumentEditorProps = {
   command: EditorCommand | null
   active: boolean
   focused: boolean
+  editing: boolean
   theme: Theme
   onMetaChange: (documentId: string, meta: EditorMeta) => void
 }
@@ -125,15 +129,6 @@ type FeedbackDraftSnapshot = {
   text: string
   target: FeedbackTarget
   interactionTrace: FeedbackInteraction[]
-}
-
-type PointerUpdate = {
-  pointer: {
-    x: number
-    y: number
-    tool: 'pointer' | 'laser'
-  }
-  button: 'down' | 'up'
 }
 
 type PointerSample = {
@@ -340,6 +335,7 @@ function DocumentEditor({
   command,
   active,
   focused,
+  editing,
   theme,
   onMetaChange
 }: DocumentEditorProps): React.JSX.Element {
@@ -805,34 +801,18 @@ function DocumentEditor({
   ])
 
   useEffect(() => {
-    if (!command || command.version <= handledCommandVersionRef.current) {
-      return
-    }
-    handledCommandVersionRef.current = command.version
-    queueMicrotask(() => {
-      if (command.type === 'save') {
-        void saveCurrent(false)
-      } else if (command.type === 'save-as') {
-        void saveCurrent(true)
-      } else if (command.type === 'reload') {
-        void reload()
-      } else {
-        fitToContent()
-      }
-    })
-  }, [command, fitToContent, reload, saveCurrent])
-
-  useEffect(() => {
     onMetaChange(document.id, {
       path,
       status,
       dirty,
+      canvasBackground,
       feedbackCount: feedbackState.feedback.length,
       feedbackLoaded,
       feedbackActive: feedbackPanelOpen
     })
   }, [
     dirty,
+    canvasBackground,
     document.id,
     feedbackState.feedback.length,
     feedbackLoaded,
@@ -952,6 +932,28 @@ function DocumentEditor({
       captureUpdate: CaptureUpdateAction.IMMEDIATELY
     })
   }, [])
+
+  useEffect(() => {
+    if (!command || command.version <= handledCommandVersionRef.current) {
+      return
+    }
+    handledCommandVersionRef.current = command.version
+    queueMicrotask(() => {
+      if (command.type === 'save') {
+        void saveCurrent(false)
+      } else if (command.type === 'save-as') {
+        void saveCurrent(true)
+      } else if (command.type === 'reload') {
+        void reload()
+      } else if (command.type === 'fit-to-content') {
+        fitToContent()
+      } else if (command.type === 'open-feedback') {
+        setFeedbackPanelOpen(true)
+      } else if (command.type === 'canvas-background' && editing) {
+        changeCanvasBackground(command.color)
+      }
+    })
+  }, [changeCanvasBackground, command, editing, fitToContent, reload, saveCurrent])
 
   useEffect(() => {
     let canceled = false
@@ -1181,7 +1183,10 @@ function DocumentEditor({
     [document.id]
   )
 
-  const handlePointerUpdate = useCallback((update: PointerUpdate): void => {
+  const handlePointerUpdate = useCallback((
+    point: FeedbackInteraction['point'],
+    button: 'down' | 'up'
+  ): void => {
     const startedAt = recordingStartedAtRef.current
     const api = apiRef.current
     if (!recordingRef.current || startedAt === null || !api) {
@@ -1189,10 +1194,9 @@ function DocumentEditor({
     }
 
     const now = performance.now()
-    const point = { x: update.pointer.x, y: update.pointer.y }
     const elementIds = elementIdsAtPoint(api.getSceneElements(), point)
     const isClick =
-      update.button === 'down' && lastPointerButtonRef.current !== 'down'
+      button === 'down' && lastPointerButtonRef.current !== 'down'
     const previous = lastPointerSampleRef.current
     const distanceSquared = previous
       ? (point.x - previous.point.x) ** 2 +
@@ -1205,7 +1209,7 @@ function DocumentEditor({
       now - previous.at >= 250 ||
       distanceSquared >= 24 ** 2
 
-    lastPointerButtonRef.current = update.button
+    lastPointerButtonRef.current = button
     if (!shouldCapture) {
       return
     }
@@ -1246,6 +1250,37 @@ function DocumentEditor({
       }
     }
   }, [])
+
+  const handleCanvasPointer = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>): void => {
+      if (!feedbackPanelOpen) {
+        return
+      }
+      if (event.type === 'pointerup' || event.type === 'pointercancel') {
+        lastPointerButtonRef.current = 'up'
+        return
+      }
+      if (
+        !(event.target instanceof Element) ||
+        !event.target.closest('.excalidraw__canvas')
+      ) {
+        return
+      }
+      if (event.type === 'pointerdown' && event.button !== 0) {
+        return
+      }
+      const api = apiRef.current
+      if (!api) {
+        return
+      }
+      const point = viewportCoordsToSceneCoords(event, api.getAppState())
+      handlePointerUpdate(
+        point,
+        event.type === 'pointerdown' ? 'down' : 'up'
+      )
+    },
+    [feedbackPanelOpen, handlePointerUpdate]
+  )
 
   const finishRecording = useCallback(async (
     sendAfterTranscription = false
@@ -1554,49 +1589,11 @@ function DocumentEditor({
     <section
       className={`document-pane${active ? ' document-pane--active' : ''}${
         feedbackPanelOpen ? ' document-pane--feedback-active' : ''
+      }${
+        !editing || feedbackPanelOpen ? ' document-pane--viewing' : ''
       }`}
       aria-hidden={!active}
     >
-      <div className="document-toolbar">
-        <div className="document-identity">
-          <strong>{documentName(path)}</strong>
-          <span title={path ?? undefined}>{path ?? 'Unsaved drawing'}</span>
-        </div>
-        <div className="header-actions">
-          <span className={`status status--${status}`} aria-live="polite">
-            {statusLabels[status]}
-          </span>
-          <button
-            type="button"
-            aria-pressed={feedbackPanelOpen}
-            onClick={() => setFeedbackPanelOpen((open) => !open)}
-          >
-            Give feedback
-          </button>
-          <label className="color-control" title="Choose the canvas background color">
-            <span>Canvas</span>
-            <input
-              type="color"
-              aria-label="Canvas background color"
-              value={canvasBackground}
-              onChange={(changeEvent) =>
-                changeCanvasBackground(changeEvent.target.value)
-              }
-            />
-          </label>
-          <button type="button" onClick={fitToContent}>
-            Fit to Content
-          </button>
-          <button
-            type="button"
-            disabled={!path}
-            onClick={() => void reload()}
-          >
-            Reload
-          </button>
-        </div>
-      </div>
-
       {detail && (
         <div className={`banner banner--${status}`} role="alert">
           <span>{detail}</span>
@@ -1610,7 +1607,13 @@ function DocumentEditor({
         </div>
       )}
 
-      <div className="canvas-shell">
+      <div
+        className="canvas-shell"
+        onPointerDownCapture={handleCanvasPointer}
+        onPointerMoveCapture={handleCanvasPointer}
+        onPointerUpCapture={handleCanvasPointer}
+        onPointerCancelCapture={handleCanvasPointer}
+      >
         <Excalidraw
           key={editorSeed.key}
           initialData={initialData}
@@ -1618,13 +1621,13 @@ function DocumentEditor({
             apiRef.current = api
           }}
           onChange={handleEditorChange}
-          onPointerUpdate={handlePointerUpdate}
+          viewModeEnabled={!editing || feedbackPanelOpen}
           theme={theme}
           autoFocus={focused}
           handleKeyboardGlobally={focused}
           UIOptions={{
             canvasActions: {
-              changeViewBackgroundColor: true,
+              changeViewBackgroundColor: editing && !feedbackPanelOpen,
               loadScene: false,
               saveToActiveFile: false,
               toggleTheme: true
@@ -1998,6 +2001,7 @@ export function App(): React.JSX.Element {
   const eventVersionRef = useRef(0)
   const commandVersionRef = useRef(0)
   const metaRef = useRef(new Map<string, EditorMeta>())
+  const menuRef = useRef<HTMLDivElement | null>(null)
   const [tabs, setTabs] = useState<TabEntry[]>([])
   const tabsRef = useRef<TabEntry[]>([])
   const [editorMeta, setEditorMeta] = useState<Record<string, EditorMeta>>({})
@@ -2015,6 +2019,8 @@ export function App(): React.JSX.Element {
     null
   )
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [editing, setEditing] = useState(false)
   const [systemTheme, setSystemTheme] = useState<Theme>(() =>
     window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
   )
@@ -2029,6 +2035,7 @@ export function App(): React.JSX.Element {
   const feedbackActive =
     activeDocumentId !== null &&
     editorMeta[activeDocumentId]?.feedbackActive === true
+  const activeMeta = activeDocumentId ? editorMeta[activeDocumentId] : undefined
   const split = tabs.some((tab) => tab.pane === 'secondary')
 
   const selectDocument = useCallback(
@@ -2129,12 +2136,13 @@ export function App(): React.JSX.Element {
   const sendEditorCommand = useCallback(
     (
       documentId: string | null,
-      type: EditorCommand['type']
+      action: EditorCommandAction
     ): void => {
       if (!documentId) {
         return
       }
-      const command = { version: ++commandVersionRef.current, type }
+      const command = { ...action, version: ++commandVersionRef.current }
+      setMenuOpen(false)
       setCommands((current) => ({ ...current, [documentId]: command }))
       activateDocument(
         documentId,
@@ -2153,7 +2161,7 @@ export function App(): React.JSX.Element {
       } else if (command.type === 'open-path') {
         void openPath(command.path)
       } else {
-        sendEditorCommand(command.documentId, command.type)
+        sendEditorCommand(command.documentId, { type: command.type })
       }
     },
     [newDocument, openDialog, openPath, sendEditorCommand]
@@ -2221,6 +2229,28 @@ export function App(): React.JSX.Element {
     }
   }, [contextMenu])
 
+  useEffect(() => {
+    if (!menuOpen) {
+      return
+    }
+    const dismiss = (event: PointerEvent): void => {
+      if (!menuRef.current?.contains(event.target as Node)) {
+        setMenuOpen(false)
+      }
+    }
+    const onEscape = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        setMenuOpen(false)
+        menuRef.current?.querySelector('button')?.focus()
+      }
+    }
+    window.addEventListener('pointerdown', dismiss)
+    window.addEventListener('keydown', onEscape)
+    return () => {
+      window.removeEventListener('pointerdown', dismiss)
+      window.removeEventListener('keydown', onEscape)
+    }
+  }, [menuOpen])
   const checkForUpdates = useCallback(async (): Promise<void> => {
     setUpdatePhase('checking')
     setDetail(null)
@@ -2463,121 +2493,226 @@ export function App(): React.JSX.Element {
       onDragOver={(event) => event.preventDefault()}
       onDrop={handleDrop}
     >
-      <header className="app-header">
-        <div className="document-identity">
-          <strong>Excalidraw Visualizer</strong>
-          {appVersion && (
-            <span className="app-version" title={`Version ${appVersion}`}>
-              {appVersion}
-            </span>
-          )}
-          <span>Local diagrams and visual feedback</span>
+      <header className="workspace-bar">
+        <div className={`document-tabs${split ? ' document-tabs--split' : ''}`}>
+          {(['primary', 'secondary'] as const)
+            .filter((pane) => pane === 'primary' || split)
+            .map((pane) => (
+              <nav
+                key={pane}
+                className={`document-tab-strip document-tab-strip--${pane}`}
+                aria-label={`${pane === 'primary' ? 'Primary' : 'Secondary'} drawings`}
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={(event) => {
+                  event.preventDefault()
+                  if (draggingDocumentId) {
+                    moveTab(draggingDocumentId, pane)
+                  }
+                }}
+              >
+                {tabs
+                  .filter((tab) => tab.pane === pane)
+                  .map((tab) => {
+                    const meta = editorMeta[tab.document.id]
+                    const tabPath = meta?.path ?? tab.document.path
+                    const tabStatus = meta?.status ?? 'loading'
+                    return (
+                      <div
+                        key={tab.document.id}
+                        data-document-id={tab.document.id}
+                        className={`document-tab${
+                          tab.document.id === activeDocuments[pane]
+                            ? ' document-tab--active'
+                            : ''
+                        }`}
+                        draggable
+                        onDragStart={() => setDraggingDocumentId(tab.document.id)}
+                        onDragEnd={() => setDraggingDocumentId(null)}
+                        onContextMenu={(event) => {
+                          event.preventDefault()
+                          activateDocument(tab.document.id, pane)
+                          setContextMenu({
+                            documentId: tab.document.id,
+                            x: event.clientX,
+                            y: event.clientY
+                          })
+                        }}
+                      >
+                        <button
+                          type="button"
+                          className="document-tab__select"
+                          title={tabPath ?? 'Untitled drawing'}
+                          onClick={() => activateDocument(tab.document.id, pane)}
+                        >
+                          <span>{documentName(tabPath)}</span>
+                        </button>
+                        <span
+                          className={`status status--${tabStatus}`}
+                          title={statusLabels[tabStatus]}
+                          role="status"
+                          aria-label={`${documentName(tabPath)}: ${statusLabels[tabStatus]}`}
+                        />
+                        <button
+                          type="button"
+                          className="document-tab__close"
+                          aria-label={`Close ${documentName(tabPath)}`}
+                          onClick={() => void closeTab(tab.document.id)}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    )
+                  })}
+              </nav>
+            ))}
         </div>
-        <div className="header-actions">
+        <div className="workspace-actions">
+          <span
+            className={`status status--${activeMeta?.status ?? 'no-file'}`}
+            title={activeMeta?.path ?? 'Unsaved drawing'}
+            aria-live="polite"
+          >
+            {statusLabels[activeMeta?.status ?? 'no-file']}
+          </span>
           <button
             type="button"
-            className="update-button"
-            disabled={
-              updatePhase === 'checking' ||
-              updatePhase === 'downloading' ||
-              updatePhase === 'installing'
+            className="feedback-button primary-button"
+            disabled={!activeDocumentId}
+            onClick={() =>
+              sendEditorCommand(activeDocumentId, { type: 'open-feedback' })
             }
-            onClick={handleUpdateAction}
           >
-            {updateButtonLabel}
+            Give feedback
           </button>
-          <label className="theme-control">
-            <span>Theme</span>
-            <select
-              aria-label="Application theme"
-              value={themePreference}
-              onChange={(event) =>
-                setThemePreference(event.target.value as ThemePreference)
-              }
+          <button
+            type="button"
+            className="mode-button"
+            aria-pressed={editing}
+            aria-label={editing ? 'Switch to view mode' : 'Switch to edit mode'}
+            title={editing ? 'Switch to view mode' : 'Switch to edit mode'}
+            onClick={() => setEditing((current) => !current)}
+          >
+            {editing ? 'View' : 'Edit'}
+          </button>
+          <div className="workspace-overflow" ref={menuRef}>
+            <button
+              type="button"
+              aria-label="More actions"
+              aria-expanded={menuOpen}
+              aria-controls="workspace-menu"
+              onClick={() => setMenuOpen((open) => !open)}
             >
-              <option value="system">System</option>
-              <option value="light">Light</option>
-              <option value="dark">Dark</option>
-            </select>
-          </label>
-          <button type="button" onClick={() => void newDocument()}>
-            New
-          </button>
-          <button type="button" onClick={() => void openDialog()}>
-            Open
-          </button>
+              ☰
+            </button>
+            {menuOpen && (
+              <div className="workspace-menu" id="workspace-menu">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false)
+                    void newDocument()
+                  }}
+                >
+                  New drawing
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false)
+                    void openDialog()
+                  }}
+                >
+                  Open drawing…
+                </button>
+                <button
+                  type="button"
+                  disabled={!activeDocumentId}
+                  onClick={() =>
+                    sendEditorCommand(activeDocumentId, { type: 'save' })
+                  }
+                >
+                  Save
+                </button>
+                <button
+                  type="button"
+                  disabled={!activeDocumentId}
+                  onClick={() =>
+                    sendEditorCommand(activeDocumentId, { type: 'save-as' })
+                  }
+                >
+                  Save as…
+                </button>
+                <button
+                  type="button"
+                  disabled={!activeDocumentId}
+                  onClick={() =>
+                    sendEditorCommand(activeDocumentId, { type: 'fit-to-content' })
+                  }
+                >
+                  Fit to Content
+                </button>
+                <button
+                  type="button"
+                  disabled={!activeMeta?.path}
+                  onClick={() =>
+                    sendEditorCommand(activeDocumentId, { type: 'reload' })
+                  }
+                >
+                  Reload from Disk
+                </button>
+                {editing && (
+                  <label className="color-control" title="Choose the canvas background color">
+                    <span>Canvas</span>
+                    <input
+                      type="color"
+                      aria-label="Canvas background color"
+                      disabled={!activeDocumentId}
+                      value={activeMeta?.canvasBackground ?? defaultCanvasBackground}
+                      onChange={(event) =>
+                        sendEditorCommand(activeDocumentId, {
+                          type: 'canvas-background',
+                          color: event.target.value
+                        })
+                      }
+                    />
+                  </label>
+                )}
+                <label className="theme-control">
+                  <span>Theme</span>
+                  <select
+                    aria-label="Application theme"
+                    value={themePreference}
+                    onChange={(event) =>
+                      setThemePreference(event.target.value as ThemePreference)
+                    }
+                  >
+                    <option value="system">System</option>
+                    <option value="light">Light</option>
+                    <option value="dark">Dark</option>
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  className="update-button"
+                  disabled={
+                    updatePhase === 'checking' ||
+                    updatePhase === 'downloading' ||
+                    updatePhase === 'installing'
+                  }
+                  onClick={handleUpdateAction}
+                >
+                  {updateButtonLabel}
+                </button>
+                {appVersion && (
+                  <small className="app-version" title={`Version ${appVersion}`}>
+                    Excalidraw Visualizer {appVersion}
+                  </small>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </header>
-
-      <div className={`document-tabs${split ? ' document-tabs--split' : ''}`}>
-        {(['primary', 'secondary'] as const)
-          .filter((pane) => pane === 'primary' || split)
-          .map((pane) => (
-            <nav
-              key={pane}
-              className={`document-tab-strip document-tab-strip--${pane}`}
-              aria-label={`${pane === 'primary' ? 'Primary' : 'Secondary'} drawings`}
-              onDragOver={(event) => event.preventDefault()}
-              onDrop={(event) => {
-                event.preventDefault()
-                if (draggingDocumentId) {
-                  moveTab(draggingDocumentId, pane)
-                }
-              }}
-            >
-              {tabs
-                .filter((tab) => tab.pane === pane)
-                .map((tab) => {
-                  const meta = editorMeta[tab.document.id]
-                  const tabPath = meta?.path ?? tab.document.path
-                  return (
-                    <div
-                      key={tab.document.id}
-                      className={`document-tab${
-                        tab.document.id === activeDocuments[pane]
-                          ? ' document-tab--active'
-                          : ''
-                      }`}
-                      draggable
-                      onDragStart={() =>
-                        setDraggingDocumentId(tab.document.id)
-                      }
-                      onDragEnd={() => setDraggingDocumentId(null)}
-                      onContextMenu={(event) => {
-                        event.preventDefault()
-                        activateDocument(tab.document.id, pane)
-                        setContextMenu({
-                          documentId: tab.document.id,
-                          x: event.clientX,
-                          y: event.clientY
-                        })
-                      }}
-                    >
-                      <button
-                        type="button"
-                        className="document-tab__select"
-                        title={tabPath ?? 'Untitled drawing'}
-                        onClick={() => activateDocument(tab.document.id, pane)}
-                      >
-                        <span>{documentName(tabPath)}</span>
-                        {meta?.dirty && (
-                          <span aria-label="Unsaved changes">●</span>
-                        )}
-                      </button>
-                      <button
-                        type="button"
-                        className="document-tab__close"
-                        aria-label={`Close ${documentName(tabPath)}`}
-                        onClick={() => void closeTab(tab.document.id)}
-                      >
-                        ×
-                      </button>
-                    </div>
-                  )
-                })}
-            </nav>
-          ))}
-      </div>
 
       {detail && (
         <div className="global-banner" role="alert">
@@ -2619,6 +2754,7 @@ export function App(): React.JSX.Element {
           tabs.map((tab) => (
             <div
               key={tab.document.id}
+              data-document-id={tab.document.id}
               className={`editor-slot editor-slot--${tab.pane}${
                 activeDocuments[tab.pane] === tab.document.id
                   ? ' editor-slot--active'
@@ -2635,6 +2771,7 @@ export function App(): React.JSX.Element {
                   focusedPane === tab.pane &&
                   activeDocuments[tab.pane] === tab.document.id
                 }
+                editing={editing}
                 theme={theme}
                 onMetaChange={updateMeta}
               />
