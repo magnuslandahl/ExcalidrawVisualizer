@@ -211,9 +211,10 @@ execute the emitted ESM preload bundle.
 
 The application layout uses explicit CSS grid rows for the compact tab/action
 row, optional global banner, and workspace. Each document pane explicitly
-places its optional banner and canvas. Do not return to implicit placement:
-when a banner is absent, implicit placement can put the workspace in a
-zero-height `auto` row and render the Excalidraw canvas blank.
+places its optional banner in the first row and canvas in the second row.
+Successful exports do not leave a persistent banner. Do not return to implicit
+placement: when a banner is absent, implicit placement can put the workspace
+in a zero-height `auto` row and render the Excalidraw canvas blank.
 
 ## Architecture
 

@@ -954,14 +954,11 @@ function DocumentEditor({
         throw new Error('The drawing is not ready')
       }
       const data = await renderExport(api, format)
-      const saved = await window.desktop.exportDrawing({
+      await window.desktop.exportDrawing({
         documentId: document.id,
         format,
         data
       })
-      if (saved) {
-        setDetail(`Exported ${format.toUpperCase()} image.`)
-      }
     } catch (error) {
       setDetail(`Could not export ${format.toUpperCase()}: ${messageFromError(error)}`)
     } finally {
