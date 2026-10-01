@@ -27,6 +27,8 @@ diagrams immediately recognizable, easy to scan, and predictable to extend.
    map of the idea. The architecture drawing is the evidence behind it.
 7. **Make source files safe to regenerate.** Use stable semantic element IDs and
    deterministic scene generation when a diagram is produced from code.
+8. **Draw before explaining.** Use a labeled pictogram, short rows, and one
+   concrete example before adding prose to a concept card.
 
 ## The two drawing types
 
@@ -47,6 +49,8 @@ Recommended characteristics:
 - Three or four numbered sections.
 - One primary flow per section.
 - Large cards and short text.
+- A few simple, labeled icons where they make related concepts easier to tell
+  apart; the drawing is an architecture map, not a pixel-perfect UX design.
 - No exhaustive endpoint, field, or error catalogues.
 - A compact term directory as the final section.
 - Export at 2x when practical so labels remain readable in documents.
@@ -104,9 +108,12 @@ before detailed flows.
 | Text roughness | `0` | Keep text crisp |
 | Line height | `1.2` to `1.25` | Compact but readable multi-line text |
 
-Use Excalidraw's handwritten font for board titles, section headings, concept
-names, and prose labels. Use its monospace font for JSON, schema fragments, and
-wire examples.
+Use Virgil (`fontFamily: 1`) for the board title, numbered section headings, and
+large screen headings. Use Excalifont (`fontFamily: 5`) for card titles, prose,
+label/value rows, captions, and mobile-sketch details. This keeps the hand-drawn
+tone while making dense text easier to read. Use a monospace font for JSON,
+schema fragments, and wire examples. Comic Shanns is an available comparison
+font, not the default.
 
 Recommended type scale:
 
@@ -117,8 +124,9 @@ Recommended type scale:
 | Section title | `25` |
 | Overview concept title | `22`-`28` |
 | Detailed concept title | `18`-`25` |
-| Body/detail text | `13`-`17` |
-| Pill or connector label | `13`-`16` |
+| Overview body/detail text | `18`-`19` |
+| Dense detailed text | `13`-`17` |
+| Pill or connector label | `16`-`17` when space permits |
 
 Avoid text smaller than `13`. If text does not fit, increase the card or remove
 detail; do not solve density by making the drawing unreadable.
@@ -174,13 +182,31 @@ A card represents a concept, service, model, state, or step:
 
 - Rounded rectangle.
 - Solid semantic fill and stroke.
-- Centered concept title.
-- Muted explanatory detail below the title.
+- Centered concept title for simple cards; left-aligned title beside an icon
+  for a card with multiple rows.
+- Muted explanatory detail or compact label/value rows below the title.
 - Approximately `20` units of internal horizontal padding.
 - Use a `3`-unit border only for the main concept in a section.
 
 Prefer a noun for a concept card and a short verb phrase for a process step.
 Keep body text to the minimum needed to understand the relationship.
+
+### Illustrated concept card
+
+When a card is becoming a paragraph, replace the prose with a small
+Excalidraw-native pictogram and two or three aligned rows. Make icons from
+rectangles, ellipses, and lines: a route with endpoints for an excursion, a
+calendar for an event occurrence, a ticket for admission, a clock for a
+session, or a table for a reservation. Put a label beside every icon; shape
+and color must reinforce text, not substitute for it. Avoid emoji or pasted
+icon images.
+
+Use short rows such as `BOOK | organized departure`, `FLOW | Excursion
+checkout`, and `EXAMPLE | stadium trip + transport`. Thin separators can make
+rows easier to scan. Choose examples that explain the classification boundary
+rather than listing every possible product. A format such as admission,
+session, or reservation may overlap another format; illustrative arrows
+should be dashed rather than implying an exclusive API discriminator.
 
 ### Note
 
@@ -337,8 +363,10 @@ When creating scenes programmatically:
 - Lock section backgrounds and header bands.
 - Keep text as separate elements with explicit width and alignment.
 - Use a shared palette and helper functions for rectangles, text, arrows,
-  sections, cards, pills, notes, endpoints, and term cards.
+  sections, cards, pills, notes, endpoints, term cards, and vector icons.
 - Validate unique IDs and finite `x`, `y`, `width`, and `height` values.
+- Measure text against the chosen bundled font when possible; changing to
+  Excalifont can change line widths even if box geometry is unchanged.
 - Write the complete JSON atomically instead of streaming into the target file.
 
 A minimal token object:
@@ -407,12 +435,13 @@ Before considering a drawing complete, verify:
 - [ ] Each primary concept has one stable name.
 - [ ] The source of truth and read-model boundaries are explicit.
 - [ ] Solid and dashed connectors have consistent meanings.
+- [ ] Key concepts have labeled icons or compact rows instead of dense prose.
 - [ ] Connector labels do not overlap cards or other lines.
-- [ ] Text is readable at the intended export size.
+- [ ] Excalifont body and card text fits its boxes and remains readable at
+      the intended viewing size.
 - [ ] The term directory matches the diagram.
 - [ ] Obsolete terminology is absent from the target-state visual.
 - [ ] Open questions are visibly separated from decided architecture.
 - [ ] Element IDs are unique and geometry is finite.
 - [ ] The `.excalidraw` file opens in Excalidraw Visualizer.
 - [ ] The exported PNG or PDF contains the whole scene without editor chrome.
-
