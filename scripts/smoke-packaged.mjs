@@ -572,6 +572,34 @@ try {
     (message) => message.includes('Could not export SVG: There are no elements to export'),
     'empty-scene export error without opening a save dialog'
   )
+  const bannerLayout = await connection.evaluate(`(() => {
+    const pane = document.querySelector('.document-pane--active')
+    const banner = pane?.querySelector('.banner')
+    const canvas = pane?.querySelector('.canvas-shell')
+    if (!pane || !banner || !canvas) throw new Error('Export error layout is unavailable')
+    const paneBounds = pane.getBoundingClientRect()
+    const bannerBounds = banner.getBoundingClientRect()
+    const canvasBounds = canvas.getBoundingClientRect()
+    return {
+      paneWidth: paneBounds.width,
+      paneHeight: paneBounds.height,
+      bannerWidth: bannerBounds.width,
+      bannerHeight: bannerBounds.height,
+      bannerBottom: bannerBounds.bottom,
+      canvasWidth: canvasBounds.width,
+      canvasHeight: canvasBounds.height,
+      canvasTop: canvasBounds.top
+    }
+  })()`)
+  if (
+    bannerLayout.bannerWidth < bannerLayout.paneWidth - 2 ||
+    bannerLayout.bannerHeight > 80 ||
+    bannerLayout.bannerBottom > bannerLayout.canvasTop + 1 ||
+    bannerLayout.canvasWidth < bannerLayout.paneWidth - 2 ||
+    bannerLayout.canvasHeight < bannerLayout.paneHeight - 80
+  ) {
+    throw new Error(`Export message obscured the canvas: ${JSON.stringify(bannerLayout)}`)
+  }
   const bridgeRejection = await connection.evaluate(`(async () => {
     try {
       await window.desktop.exportDrawing({

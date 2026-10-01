@@ -88,7 +88,9 @@ then choose a local destination. Export includes the currently visible drawing,
 its embedded images, and its canvas background, including edits not yet saved.
 It excludes feedback overlays, selection handles, and the viewport. Export is
 offline, never changes the `.excalidraw` source, and does not replace the
-editable file format. WebP is not a vector format; choose SVG for vector output.
+editable file format. A completed export leaves the canvas unobstructed;
+export errors appear in a dismissible message above it. WebP is not a vector
+format; choose SVG for vector output.
 
 ## Local feedback and GitHub Copilot pairing
 
