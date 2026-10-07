@@ -334,6 +334,7 @@ try {
   connection = await connectToRenderer()
   await Promise.all([
     connection.send('Runtime.enable'),
+    connection.send('Page.enable'),
     connection.send('Log.enable'),
     connection.send('Network.enable')
   ])
@@ -439,6 +440,35 @@ try {
     'canvas-first feedback mode'
   )
   if (testRecordingSelection) {
+    await waitFor(
+      () => connection.evaluate(
+        `[...document.querySelectorAll('.feedback-panel button')].some((button) =>
+          button.textContent?.trim() === 'Refresh microphones' && !button.disabled)`
+      ),
+      Boolean,
+      'initial microphone enumeration'
+    )
+    await connection.evaluate(`(() => {
+      const button = [...document.querySelectorAll('.feedback-panel button')]
+        .find((candidate) => candidate.textContent?.trim() === 'Refresh microphones')
+      if (!(button instanceof HTMLButtonElement)) {
+        throw new Error('The microphone refresh control is unavailable')
+      }
+      button.click()
+    })()`)
+    await waitFor(
+      () => connection.evaluate(`(() => {
+        const select = document.querySelector('[aria-label="Microphone"]')
+        if (!(select instanceof HTMLSelectElement)) return false
+        const input = [...select.options].find((option) => option.value && option.text.includes('Fake'))
+        if (select.disabled || !input) return false
+        select.value = input.value
+        select.dispatchEvent(new Event('change', { bubbles: true }))
+        return true
+      })()`),
+      Boolean,
+      'a selectable fake audio input'
+    )
     await connection.evaluate(`(() => {
       const button = [...document.querySelectorAll('.feedback-panel button')]
         .find((candidate) => candidate.textContent?.trim() === 'Start dictating')
@@ -453,6 +483,13 @@ try {
       ),
       (heading) => heading === 'Recording feedback',
       'fake microphone recording'
+    )
+    await waitFor(
+      () => connection.evaluate(
+        `document.querySelector('[aria-label="Microphone audio level"]')?.value ?? 0`
+      ),
+      (level) => level > 0 && level <= 1,
+      'live audio from the selected microphone'
     )
     const pointer = await connection.evaluate(`(() => {
       const rect = document.querySelector('.editor-slot--active .canvas-shell')
@@ -493,14 +530,47 @@ try {
         Number(context.match(/(\d+) interactions?/)?.[1] ?? 0) >= 2,
       'selected element feedback context during recording'
     )
-    await connection.evaluate(`(() => {
+    const recordingControls = await connection.evaluate(`(() => ({
+      transcribe: [...document.querySelectorAll('.dictation-controls button')]
+        .some((button) => button.textContent?.trim() === 'Transcribe'),
+      meter: !!document.querySelector('[aria-label="Microphone audio level"]'),
+      input: document.querySelector('.microphone-meter > span')?.textContent ?? ''
+    }))()`)
+    if (!recordingControls.transcribe || !recordingControls.meter || !recordingControls.input.includes('Fake')) {
+      throw new Error(`Recording controls or selected microphone missing: ${JSON.stringify(recordingControls)}`)
+    }
+    const requestCancel = () => connection.evaluate(`(() => {
       const button = [...document.querySelectorAll('.feedback-panel button')]
-        .find((candidate) => candidate.textContent?.trim() === 'Stop without transcript')
+        .find((candidate) => candidate.textContent?.trim() === 'Cancel')
       if (!(button instanceof HTMLButtonElement)) {
         throw new Error('The cancel recording control is unavailable')
       }
       button.click()
     })()`)
+    const declinedCancel = requestCancel()
+    await waitFor(
+      () => connection.events.filter((event) => event.method === 'Page.javascriptDialogOpening'),
+      (events) => events.some((event) => event.params.message.includes('Are you sure')),
+      'recording cancellation confirmation'
+    )
+    await connection.send('Page.handleJavaScriptDialog', { accept: false })
+    await declinedCancel
+    if (!(await connection.evaluate(
+      `document.querySelector('.feedback-panel h2')?.textContent?.trim() === 'Recording feedback'`
+    ))) {
+      throw new Error('Declining cancellation did not keep the recording active')
+    }
+    const dialogCount = connection.events.filter(
+      (event) => event.method === 'Page.javascriptDialogOpening'
+    ).length
+    const confirmedCancel = requestCancel()
+    await waitFor(
+      () => connection.events.filter((event) => event.method === 'Page.javascriptDialogOpening').length,
+      (count) => count > dialogCount,
+      'second recording cancellation confirmation'
+    )
+    await connection.send('Page.handleJavaScriptDialog', { accept: true })
+    await confirmedCancel
     await waitFor(
       () => connection.evaluate(
         `document.querySelector('.feedback-panel h2')?.textContent?.trim() ?? ''`
@@ -862,6 +932,9 @@ try {
           feedbackFocusState.automaticContext.includes('Whole drawing') &&
           feedbackFocusState.targetButtonCount === 0,
         recordingElementSelection: testRecordingSelection ? true : 'not-tested',
+        microphoneSelection: testRecordingSelection ? true : 'not-tested',
+        microphoneAudioLevel: testRecordingSelection ? true : 'not-tested',
+        recordingCancelConfirmation: testRecordingSelection ? true : 'not-tested',
         exportFormats: exportOptions.length,
         emptyExportRejected: true,
         exportBridgeValidated: true,

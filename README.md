@@ -104,15 +104,26 @@ remains the whole drawing. No target picker is required. **Copy for agent** puts
 revision-labelled text submission on the clipboard, so the local workflow also works
 without pairing an agent.
 
-The feedback composer also supports local dictation. Choose **English**, **Svenska**,
-or **Auto language**, start recording, and interact with the canvas. When paired,
-one **Send feedback** action stops recording, transcribes locally, sends immediately,
-clears the completed message, and leaves the panel ready for the next recording.
-Without pairing, **Finish dictation** keeps the editable transcript for copying.
-The panel collapses to a compact recorder during capture. Audio is converted to
-bounded PCM, processed locally with VAD, and removed after completion, cancellation,
-or failure. Existing typed text is preserved when microphone permission or
-transcription fails.
+The feedback composer also supports local dictation. Under **Microphone**, choose
+**System default** or a specific input. **Refresh microphones** explicitly requests
+audio-only access and lists available inputs; it stops that discovery capture
+immediately afterward. The selected input is remembered locally. If it becomes
+unavailable, choose another input rather than silently switching devices. Choose
+**English**, **Svenska**, or **Auto language**, then **Start dictating**. The compact
+recorder shows the input name and an audio-level meter: speak to check the signal
+and check the microphone's mute control if the meter stays empty. Permission errors
+include Windows/macOS settings guidance.
+
+During recording, **Transcribe** stops capture and puts the local transcript into
+the editable feedback field without sending anything, even when paired. Review
+and edit it before choosing **Send now**, **Queue**, or **Copy for agent**.
+When paired, **Send feedback** remains the one-button stop, transcribe, and send
+action; an accepted delivery resets the composer for the next message.
+**Cancel** (or **Cancel transcription**) asks for confirmation before discarding
+the current recording or pending transcript; existing typed feedback is kept.
+Audio is converted to bounded PCM, processed locally with VAD, and removed after
+completion, cancellation, or failure. Typed text is preserved if microphone
+permission or transcription fails.
 
 To deliver feedback directly to the intended GitHub Copilot task:
 
