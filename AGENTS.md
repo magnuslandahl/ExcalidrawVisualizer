@@ -193,6 +193,10 @@ execute the emitted ESM preload bundle.
   transcribes locally, immediately delivers the immutable message, resets the
   composer, and leaves it ready for another recording. Its overlays and
   interaction trace never enter saved or exported drawings.
+- Transcribe stops recording for local review without sending, including while
+  paired. Cancel and Cancel transcription require confirmation and preserve
+  pre-existing feedback text. A canceled result must never be inserted or sent,
+  even if the native job completes concurrently.
 - Copy for agent creates an immutable local submission snapshot and copies it to
   the clipboard. Persistence remains an implementation detail for immutable
   delivery and recovery rather than a saved-feedback management UI.
@@ -207,7 +211,12 @@ execute the emitted ESM preload bundle.
 - Feedback dictation is explicitly activated, editable before copying, and
   processed offline through bundled English/Swedish multilingual Whisper assets.
   Typed text survives permission denial, cancellation, silence, or engine
-  failure.
+  failure. The microphone selector remembers only the input ID locally; device
+  names never enter drawings or provider messages. Refresh explicitly requests
+  audio-only access for discovery and immediately releases it. Specific inputs
+  use an exact device constraint, never silent fallback; device changes refresh
+  the list. The recorder resumes the AudioContext and shows the input name and
+  live level so a muted or incorrect microphone is apparent.
 
 The application layout uses explicit CSS grid rows for the compact tab/action
 row, optional global banner, and workspace. Each document pane explicitly
@@ -490,6 +499,8 @@ The focused Vitest suite currently covers:
 - feedback schema validation, atomic persistence, immutable submissions, and
   concurrent mutation serialization
 - bounded PCM downsampling/WAV encoding and dictation request validation
+- microphone constraints, discovery cleanup, permission errors, audio levels,
+  transcript review without delivery, direct sending, and cancellation races
 
 Use temporary directories and observable events for watcher tests. Do not add
 fixed sleeps as the assertion mechanism.

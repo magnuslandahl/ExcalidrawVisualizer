@@ -75,6 +75,10 @@ adapters and walkthrough recording remain future capabilities.
   - [x] Remove target-first composition: capture bounded movement, hover, click
     order, and relative timing automatically, then stop, transcribe, immediately
     send, reset, and prepare the next message through one recording-time action.
+  - [x] Add an explicit microphone selector with remembered input, audio-only
+    discovery, a live input meter, and actionable permission errors. Add
+    Transcribe for editable review without sending and confirmed cancellation
+    that preserves typed text and rejects late canceled results.
   - [x] Bundle the companion in packaged applications and add an explicit
     user-wide install/update action that refuses to overwrite unmanaged copies.
 - [ ] Evaluate walkthrough recording and additional agent adapters only after the

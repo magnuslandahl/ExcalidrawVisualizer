@@ -969,7 +969,8 @@ input[type="color"]:focus-visible {
   margin-top: 8px;
 }
 
-.dictation-controls select {
+.dictation-controls select,
+.microphone-controls select {
   min-width: 138px;
   flex: 1;
   height: 30px;
@@ -980,6 +981,32 @@ input[type="color"]:focus-visible {
   color: var(--text);
   font: inherit;
   font-size: 11px;
+}
+
+.microphone-controls {
+  margin-top: 12px;
+}
+
+.microphone-controls label {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.microphone-controls select {
+  width: 100%;
+}
+
+.microphone-meter {
+  display: grid;
+  gap: 5px;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.microphone-meter meter {
+  width: 100%;
 }
 
 .feedback-progress,

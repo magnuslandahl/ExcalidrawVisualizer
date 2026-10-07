@@ -37,6 +37,13 @@ import type {
 } from '../../shared/contracts'
 import { renderExport } from './export-image'
 import {
+  listMicrophones,
+  microphoneConstraints,
+  microphoneError,
+  microphoneLevel,
+  type MicrophoneInput
+} from './microphones'
+import {
   MAX_FEEDBACK_INTERACTION_EVENTS,
   type FeedbackBounds,
   type FeedbackDocumentState,
@@ -109,6 +116,8 @@ type DocumentEditorProps = {
   focused: boolean
   editing: boolean
   theme: Theme
+  microphoneId: string
+  onMicrophoneChange: (deviceId: string) => void
   onMetaChange: (documentId: string, meta: EditorMeta) => void
 }
 
@@ -142,6 +151,7 @@ type PointerSample = {
 }
 
 const themePreferenceStorageKey = 'excalidraw-visualizer-theme'
+const microphoneStorageKey = 'excalidraw-visualizer-microphone'
 const defaultCanvasBackground = '#ffffff'
 const disconnectedAgentStatus: AgentConnectionStatus = {
   paired: false,
@@ -341,6 +351,8 @@ function DocumentEditor({
   focused,
   editing,
   theme,
+  microphoneId,
+  onMicrophoneChange,
   onMetaChange
 }: DocumentEditorProps): React.JSX.Element {
   const initialScene = useMemo(() => normalizeScene(document.scene), [document])
@@ -359,6 +371,8 @@ function DocumentEditor({
   const recordingRef = useRef<RecordingSession | null>(null)
   const recordingStartRef = useRef<object | null>(null)
   const dictationJobIdRef = useRef<string | null>(null)
+  const dictationCanceledRef = useRef(false)
+  const microphoneListRequestRef = useRef(0)
   const recordingTargetIdsRef = useRef(new Set<string>())
   const interactionTraceRef = useRef<FeedbackInteraction[]>([])
   const recordingStartedAtRef = useRef<number | null>(null)
@@ -418,8 +432,49 @@ function DocumentEditor({
   const [dictationLanguage, setDictationLanguage] =
     useState<DictationLanguage>('auto')
   const [dictationState, setDictationState] = useState<
-    'idle' | 'starting' | 'recording' | 'transcribing'
+    'idle' | 'starting' | 'recording' | 'transcribing' | 'sending'
   >('idle')
+  const [dictationWillSend, setDictationWillSend] = useState(false)
+  const [microphones, setMicrophones] = useState<MicrophoneInput[]>([])
+  const [microphoneListError, setMicrophoneListError] = useState<string | null>(null)
+  const [microphoneRefreshing, setMicrophoneRefreshing] = useState(false)
+  const [recordingMicrophone, setRecordingMicrophone] = useState('')
+  const [audioLevel, setAudioLevel] = useState(0)
+
+  const refreshMicrophones = useCallback(async (requestAccess = false): Promise<void> => {
+    const requestId = ++microphoneListRequestRef.current
+    setMicrophoneRefreshing(true)
+    try {
+      const inputs = await listMicrophones(navigator.mediaDevices, requestAccess)
+      if (requestId === microphoneListRequestRef.current) {
+        setMicrophones(inputs)
+        setMicrophoneListError(
+          inputs.length === 0 ? 'No microphones found. Connect an input and refresh.' : null
+        )
+      }
+    } catch (error) {
+      if (requestId === microphoneListRequestRef.current) {
+        setMicrophoneListError(microphoneError(error))
+      }
+    } finally {
+      if (requestId === microphoneListRequestRef.current) {
+        setMicrophoneRefreshing(false)
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!feedbackPanelOpen) {
+      return
+    }
+    const update = (): void => { void refreshMicrophones() }
+    update()
+    navigator.mediaDevices.addEventListener('devicechange', update)
+    return () => {
+      microphoneListRequestRef.current += 1
+      navigator.mediaDevices.removeEventListener('devicechange', update)
+    }
+  }, [feedbackPanelOpen, refreshMicrophones])
 
   useEffect(() => {
     draftIdRef.current = draftId
@@ -840,10 +895,12 @@ function DocumentEditor({
       }
       const recording = recordingRef.current
       recordingStartRef.current = null
+      dictationCanceledRef.current = true
       if (recording) {
         if (recording.timeout) {
           clearTimeout(recording.timeout)
         }
+        recording.processor.port.onmessage = null
         recording.processor.disconnect()
         recording.source.disconnect()
         recording.stream.getTracks().forEach((track) => track.stop())
@@ -1327,33 +1384,36 @@ function DocumentEditor({
     }
     recordingRef.current = null
     recordingStartedAtRef.current = null
+    setDictationState('transcribing')
+    setDictationWillSend(sendAfterTranscription)
+    setAudioLevel(0)
+    const jobId = crypto.randomUUID()
+    dictationJobIdRef.current = jobId
     if (recording.timeout) {
       clearTimeout(recording.timeout)
     }
+    recording.processor.port.onmessage = null
     recording.processor.disconnect()
     recording.source.disconnect()
     recording.stream.getTracks().forEach((track) => track.stop())
-    await recording.audioContext.close()
-
-    const length = recording.chunks.reduce(
-      (total, chunk) => total + chunk.length,
-      0
-    )
-    if (length === 0) {
-      setDictationState('idle')
-      setFeedbackError('No microphone audio was captured.')
-      return
-    }
-    const samples = new Float32Array(length)
-    let offset = 0
-    for (const chunk of recording.chunks) {
-      samples.set(chunk, offset)
-      offset += chunk.length
-    }
-    setDictationState('transcribing')
-    const jobId = crypto.randomUUID()
-    dictationJobIdRef.current = jobId
     try {
+      await recording.audioContext.close()
+      if (dictationCanceledRef.current) {
+        return
+      }
+      const length = recording.chunks.reduce(
+        (total, chunk) => total + chunk.length,
+        0
+      )
+      if (length === 0) {
+        throw new Error('No microphone audio was captured. Check the selected input and microphone permissions.')
+      }
+      const samples = new Float32Array(length)
+      let offset = 0
+      for (const chunk of recording.chunks) {
+        samples.set(chunk, offset)
+        offset += chunk.length
+      }
       const downsampled = downsampleMonoPcmTo16Khz(
         samples,
         recording.sourceSampleRate
@@ -1366,6 +1426,9 @@ function DocumentEditor({
         language: dictationLanguage,
         wavData
       })
+      if (dictationCanceledRef.current) {
+        return
+      }
       if (result.ok) {
         if (draftIdRef.current === recording.draftId) {
           const existingText = draftTextRef.current.trim()
@@ -1386,6 +1449,7 @@ function DocumentEditor({
                   apiRef.current?.getSceneElements() ?? [],
                   recordingTargetIdsRef.current
                 ) ?? { type: 'drawing' as const }
+              setDictationState('sending')
               await deliverFeedback('immediate', {
                 text,
                 target,
@@ -1404,7 +1468,9 @@ function DocumentEditor({
         setFeedbackError(result.message)
       }
     } catch (error) {
-      setFeedbackError(messageFromError(error))
+      if (!dictationCanceledRef.current) {
+        setFeedbackError(messageFromError(error))
+      }
     } finally {
       dictationJobIdRef.current = null
       setDictationState('idle')
@@ -1434,22 +1500,23 @@ function DocumentEditor({
     const startToken = {}
     recordingStartRef.current = startToken
     setDictationState('starting')
+    dictationCanceledRef.current = false
+    setAudioLevel(0)
     let stream: MediaStream | undefined
     let audioContext: AudioContext | undefined
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: 1,
-          echoCancellation: true,
-          noiseSuppression: true
-        },
-        video: false
-      })
+      stream = await navigator.mediaDevices.getUserMedia(
+        microphoneConstraints(microphoneId)
+      )
       if (recordingStartRef.current !== startToken) {
         stream.getTracks().forEach((track) => track.stop())
         return
       }
       audioContext = new AudioContext()
+      await audioContext.resume()
+      if (audioContext.state !== 'running') {
+        throw new Error('The microphone audio engine did not start. Try starting dictation again.')
+      }
       const source = audioContext.createMediaStreamSource(stream)
       await audioContext.audioWorklet.addModule(
         new URL('audio-capture-worklet.js', window.location.href).href
@@ -1466,8 +1533,15 @@ function DocumentEditor({
         outputChannelCount: [1]
       })
       const chunks: Float32Array[] = []
+      let lastLevelUpdate = -Infinity
       processor.port.onmessage = (messageEvent: MessageEvent<ArrayBuffer>) => {
-        chunks.push(new Float32Array(messageEvent.data))
+        const chunk = new Float32Array(messageEvent.data)
+        chunks.push(chunk)
+        const now = performance.now()
+        if (now - lastLevelUpdate >= 100) {
+          lastLevelUpdate = now
+          setAudioLevel(microphoneLevel(chunk))
+        }
       }
       source.connect(processor)
       processor.connect(audioContext.destination)
@@ -1487,15 +1561,17 @@ function DocumentEditor({
       }, MAX_AUDIO_DURATION_SECONDS * 1000)
       recordingRef.current = recording
       recordingStartedAtRef.current = performance.now()
+      setRecordingMicrophone(stream.getAudioTracks()[0]?.label || 'System default microphone')
       setDictationState('recording')
       setFeedbackError(null)
+      void refreshMicrophones()
     } catch (error) {
       stream?.getTracks().forEach((track) => track.stop())
       if (audioContext && audioContext.state !== 'closed') {
         await audioContext.close()
       }
       if (recordingStartRef.current === startToken) {
-        setFeedbackError(`Microphone access failed: ${messageFromError(error)}`)
+        setFeedbackError(microphoneError(error))
       }
     } finally {
       if (recordingStartRef.current === startToken) {
@@ -1505,25 +1581,40 @@ function DocumentEditor({
         }
       }
     }
-  }, [draftId, finishRecording])
+  }, [draftId, finishRecording, microphoneId, refreshMicrophones])
 
   const cancelDictation = useCallback(async (): Promise<void> => {
+    if (!window.confirm('Are you sure you want to cancel? This recording or transcript will be discarded. Existing feedback text will be kept.')) {
+      return
+    }
+    dictationCanceledRef.current = true
+    setAudioLevel(0)
     if (recordingRef.current) {
       const recording = recordingRef.current
       recordingRef.current = null
       if (recording.timeout) {
         clearTimeout(recording.timeout)
       }
+      recording.processor.port.onmessage = null
       recording.processor.disconnect()
       recording.source.disconnect()
       recording.stream.getTracks().forEach((track) => track.stop())
-      await recording.audioContext.close()
-      recordingStartedAtRef.current = null
-      setDictationState('idle')
+      try {
+        await recording.audioContext.close()
+      } catch (error) {
+        setFeedbackError(`Could not close microphone capture: ${messageFromError(error)}`)
+      } finally {
+        recordingStartedAtRef.current = null
+        setDictationState('idle')
+      }
       return
     }
     if (dictationJobIdRef.current) {
-      await window.desktop.cancelDictation(dictationJobIdRef.current)
+      try {
+        await window.desktop.cancelDictation(dictationJobIdRef.current)
+      } catch (error) {
+        setFeedbackError(`Could not cancel transcription: ${messageFromError(error)}`)
+      }
     }
   }, [])
 
@@ -1716,7 +1807,9 @@ function DocumentEditor({
                     ? 'Recording feedback'
                     : dictationState === 'transcribing'
                       ? 'Transcribing feedback'
-                      : 'Give feedback'}
+                      : dictationState === 'sending'
+                        ? 'Sending feedback'
+                        : 'Give feedback'}
                 </h2>
               </div>
               <button
@@ -1847,6 +1940,46 @@ function DocumentEditor({
                 />
               </label>
 
+              {dictationState === 'idle' && (
+                <div className="microphone-controls">
+                  <label>
+                    <span className="feedback-section-label">Microphone</span>
+                    <select
+                      aria-label="Microphone"
+                      value={microphoneId}
+                      disabled={microphoneRefreshing || agentBusy}
+                      onChange={(changeEvent) => onMicrophoneChange(changeEvent.target.value)}
+                    >
+                      <option value="">System default</option>
+                      {microphoneId && !microphones.some((input) => input.deviceId === microphoneId) && (
+                        <option value={microphoneId}>Selected microphone unavailable</option>
+                      )}
+                      {microphones.map((input) => (
+                        <option key={input.deviceId} value={input.deviceId}>{input.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    type="button"
+                    disabled={microphoneRefreshing || agentBusy}
+                    onClick={() => void refreshMicrophones(true)}
+                  >
+                    {microphoneRefreshing ? 'Loading microphones…' : 'Refresh microphones'}
+                  </button>
+                  <p className="feedback-progress">
+                    Refresh to allow microphone access and list inputs. If recording is silent, check that your microphone is not muted.
+                  </p>
+                  {microphoneListError && (
+                    <p className="feedback-message" role="status">{microphoneListError}</p>
+                  )}
+                  {microphoneId && !microphoneRefreshing && !microphoneListError &&
+                    !microphones.some((input) => input.deviceId === microphoneId) && (
+                      <p className="feedback-message" role="status">
+                        The selected microphone is unavailable. Reconnect it or choose another input.
+                      </p>
+                    )}
+                </div>
+              )}
               <div className="dictation-controls">
                 <select
                   aria-label="Dictation language"
@@ -1866,45 +1999,62 @@ function DocumentEditor({
                   <button
                     type="button"
                     className="primary-button"
+                    disabled={microphoneRefreshing || agentBusy}
                     onClick={() => void startRecording()}
                   >
                     Start dictating
                   </button>
-                ) : dictationState === 'starting' ? (
+                ) : dictationState === 'starting' || dictationState === 'sending' ? (
                   <button type="button" disabled>
-                    Starting microphone…
+                    {dictationState === 'sending' ? 'Sending feedback…' : 'Starting microphone…'}
                   </button>
                 ) : (
                   <button type="button" onClick={() => void cancelDictation()}>
                     {dictationState === 'recording'
-                      ? 'Stop without transcript'
+                      ? 'Cancel'
                       : 'Cancel transcription'}
                   </button>
                 )}
                 {dictationState === 'recording' && (
                   <button
                     type="button"
+                    className={agentState.connection.paired ? undefined : 'primary-button'}
+                    onClick={() => void finishRecording(false)}
+                  >
+                    Transcribe
+                  </button>
+                )}
+                {dictationState === 'recording' && agentState.connection.paired && (
+                  <button
+                    type="button"
                     className="primary-button"
                     disabled={agentBusy}
                     onClick={() =>
-                      void finishRecording(agentState.connection.paired)
+                      void finishRecording(true)
                     }
                   >
-                    {agentState.connection.paired
-                      ? 'Send feedback'
-                      : 'Finish dictation'}
+                    Send feedback
                   </button>
                 )}
               </div>
+              {dictationState === 'recording' && (
+                <div className="microphone-meter">
+                  <span>{recordingMicrophone}</span>
+                  <meter aria-label="Microphone audio level" min={0} max={1} value={audioLevel} />
+                  <small>Speak to check the input level. Transcribe lets you review before sending.</small>
+                </div>
+              )}
               {dictationState !== 'idle' && (
                 <p className="feedback-progress" role="status">
                   {dictationState === 'starting'
                     ? 'Requesting microphone access…'
                     : dictationState === 'recording'
                       ? 'Recording movement, hovered elements, and clicks.'
-                      : agentState.connection.paired
-                        ? 'Transcribing locally, then sending…'
-                        : 'Transcribing locally…'}
+                      : dictationState === 'sending'
+                        ? 'Sending feedback to Copilot…'
+                        : dictationWillSend
+                          ? 'Transcribing locally, then sending…'
+                          : 'Transcribing locally…'}
                 </p>
               )}
               {feedbackError && (
@@ -2048,6 +2198,9 @@ export function App(): React.JSX.Element {
   const [focusedPane, setFocusedPane] = useState<PaneId>('primary')
   const [commands, setCommands] = useState<Record<string, EditorCommand>>({})
   const [detail, setDetail] = useState<string | null>(null)
+  const [microphoneId, setMicrophoneId] = useState(
+    () => window.localStorage.getItem(microphoneStorageKey) ?? ''
+  )
   const [appVersion, setAppVersion] = useState('')
   const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null)
   const [updatePhase, setUpdatePhase] = useState<UpdatePhase>('idle')
@@ -2222,6 +2375,10 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     window.localStorage.setItem(themePreferenceStorageKey, themePreference)
   }, [themePreference])
+
+  useEffect(() => {
+    window.localStorage.setItem(microphoneStorageKey, microphoneId)
+  }, [microphoneId])
 
   useEffect(() => {
     let canceled = false
@@ -2864,6 +3021,8 @@ export function App(): React.JSX.Element {
             >
               <DocumentEditor
                 document={tab.document}
+                microphoneId={microphoneId}
+                onMicrophoneChange={setMicrophoneId}
                 event={tab.event}
                 eventVersion={tab.eventVersion}
                 command={commands[tab.document.id] ?? null}
