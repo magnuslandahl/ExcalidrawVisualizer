@@ -22,6 +22,7 @@
     "src/preload/**/*.ts",
     "src/renderer/src/export-image.ts",
     "src/renderer/src/App.tsx",
+    "src/renderer/src/FeedbackIcon.tsx",
     "src/renderer/src/microphones.ts",
     "src/renderer/src/env.d.ts",
     "src/shared/**/*.ts",

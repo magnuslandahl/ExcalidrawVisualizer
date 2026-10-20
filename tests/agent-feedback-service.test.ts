@@ -77,7 +77,11 @@ const arrangeStore = async (): Promise<{
     updatedAt: createdAt,
     status: 'draft',
     text: 'Move the title to the left.',
-    target: { type: 'drawing' },
+    target: {
+      type: 'elements', elementIds: ['title-element'],
+      originalBounds: { x: 20, y: 30, width: 100, height: 40 }
+    },
+    elementReferences: [{ number: 3, elementId: 'title-element', label: 'Title' }],
     interactionTrace: [
       {
         type: 'move',
@@ -251,6 +255,9 @@ describe('AgentFeedbackService', () => {
     )
     expect(submissionRequest?.prompt).toContain('"type": "click"')
     expect(submissionRequest?.prompt).toContain('"title-element"')
+    expect(submissionRequest?.prompt).toContain('"elementReferences"')
+    expect(submissionRequest?.prompt).toContain('"number": 3')
+    expect(submissionRequest?.prompt).toContain('"label": "Title"')
     expect(admitted).toMatchObject({
       status: 'accepted',
       providerMessageId: 'message-1'

@@ -1,6 +1,13 @@
 export const FEEDBACK_STORE_SCHEMA_VERSION = 1 as const
 export const MAX_FEEDBACK_TEXT_LENGTH = 10_000
 export const MAX_FEEDBACK_INTERACTION_EVENTS = 256
+export const MAX_FEEDBACK_REFERENCES = 100
+
+export type FeedbackElementReference = {
+  number: number
+  elementId: string
+  label: string
+}
 
 const MAX_ID_LENGTH = 256
 const MAX_REVISION_LENGTH = 1_024
@@ -61,6 +68,7 @@ export type LocalFeedback = {
   text: string
   target: FeedbackTarget
   interactionTrace?: FeedbackInteraction[]
+  elementReferences?: FeedbackElementReference[]
 }
 
 export type LocalFeedbackSubmission = {
@@ -307,7 +315,8 @@ export const parseLocalFeedback = (value: unknown): LocalFeedback => {
       'status',
       'text',
       'target',
-      ...('interactionTrace' in value ? ['interactionTrace'] : [])
+      ...('interactionTrace' in value ? ['interactionTrace'] : []),
+      ...('elementReferences' in value ? ['elementReferences'] : [])
     ],
     'Feedback'
   )
@@ -325,6 +334,37 @@ export const parseLocalFeedback = (value: unknown): LocalFeedback => {
   if (updatedAt < createdAt) {
     throw new FeedbackParseError('Feedback updatedAt must not precede createdAt')
   }
+  const target = parseFeedbackTarget(value.target)
+  let elementReferences: FeedbackElementReference[] | undefined
+  if ('elementReferences' in value) {
+    if (!Array.isArray(value.elementReferences) ||
+        value.elementReferences.length > MAX_FEEDBACK_REFERENCES) {
+      throw new FeedbackParseError('Too many feedback element references')
+    }
+    elementReferences = value.elementReferences.map((reference) => {
+      if (!isRecord(reference)) {
+        throw new FeedbackParseError('Feedback element reference must be an object')
+      }
+      assertExactKeys(reference, ['number', 'elementId', 'label'], 'Element reference')
+      if (typeof reference.number !== 'number' || !Number.isSafeInteger(reference.number) ||
+          reference.number < 1) {
+        throw new FeedbackParseError('Element reference number must be a positive safe integer')
+      }
+      const elementId = parseFeedbackId(reference.elementId)
+      if (target.type !== 'elements' || !target.elementIds.includes(elementId)) {
+        throw new FeedbackParseError('Element reference must belong to the feedback target')
+      }
+      return {
+        number: reference.number,
+        elementId,
+        label: parseBoundedString(reference.label, 'Element reference label', 120)
+      }
+    })
+    if (new Set(elementReferences.map((item) => item.number)).size !== elementReferences.length ||
+        new Set(elementReferences.map((item) => item.elementId)).size !== elementReferences.length) {
+      throw new FeedbackParseError('Element references must have unique numbers and ids')
+    }
+  }
 
   return {
     id: parseFeedbackId(value.id),
@@ -333,7 +373,8 @@ export const parseLocalFeedback = (value: unknown): LocalFeedback => {
     updatedAt,
     status: value.status,
     text: parseFeedbackText(value.text),
-    target: parseFeedbackTarget(value.target),
+    target,
+    ...(elementReferences ? { elementReferences } : {}),
     ...('interactionTrace' in value
       ? { interactionTrace: parseFeedbackInteractionTrace(value.interactionTrace) }
       : {})

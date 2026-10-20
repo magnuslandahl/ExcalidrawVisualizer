@@ -189,6 +189,17 @@ execute the emitted ESM preload bundle.
   relative timing are captured from the canvas during pointer capture (including
   view-mode panning). Clicked elements accumulate into one target, defaulting
   to the whole drawing when nothing is clicked.
+- Speak and Write share ordered, explicit click selections. A click selects only
+  after pointer-up without a pan gesture; hover previews never select. Numbered
+  badges and removable chips are overlays, never scene elements. Numbers are not
+  reused within a draft, even after clearing its items. Starting dictation keeps
+  selections; switching to Write clears pointer traces. Write never requests
+  microphone access and restores the textarea caret after canvas clicks.
+- Optional bounded elementReferences travel through validation, immutable local
+  snapshots, clipboard output, and provider prompts. Each maps a stable number
+  to a selected element ID and a bounded label. Old feedback remains readable.
+  Ctrl/Cmd+Enter sends when paired or copies when unpaired, only from the feedback
+  textarea; all delivery actions share a synchronous duplicate-admission guard.
 - A paired recording ends with one Send feedback action that stops capture,
   transcribes locally, immediately delivers the immutable message, resets the
   composer, and leaves it ready for another recording. Its overlays and
@@ -197,7 +208,10 @@ execute the emitted ESM preload bundle.
   paired. Cancel and Cancel transcription require confirmation and preserve
   pre-existing feedback text. A canceled result must never be inserted or sent,
   even if the native job completes concurrently.
-- Copy for agent creates an immutable local submission snapshot and copies it to
+- Feedback buttons use local SVG icons alongside their labels. Clear, Copy,
+  Queue, and Send now share one aligned action row, falling back to a two-column
+  grid in narrow panels.
+- Copy creates an immutable local submission snapshot and copies it to
   the clipboard. Persistence remains an implementation detail for immutable
   delivery and recovery rather than a saved-feedback management UI.
 - The companion canvas issues a five-minute, one-time pairing capability from
@@ -511,6 +525,12 @@ context without unmounting the renderer or changing the drawing. It also checks
 that the compact bar has wide tabs and that Edit exposes the background control.
 Excalidraw emits `onChange` after prop updates, so recording target updates
 must be idempotent to prevent a renderer-crashing update loop.
+
+Every platform activates the synthetic drawing before exercising typed feedback;
+that setup must not depend on microphone tests. Use `--skip-recording` on Windows
+to exercise the same non-recording feedback path used by the macOS smoke.
+Wait for Write mode before dispatching a primary-button gesture; selection
+timeouts report canvas geometry, pointer events, and textarea focus separately.
 
 The macOS package smoke test (`npm run smoke:mac -- <app-path>`) verifies:
 
