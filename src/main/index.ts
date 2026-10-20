@@ -290,6 +290,12 @@ const formatCopiedSubmission = (
     '',
     ...feedback.flatMap((item, index) => [
       `${index + 1}. Target: ${formatTarget(item)}`,
+      ...((item.elementReferences?.length ?? 0) > 0
+        ? [
+            'Element references (numbers used in the feedback text; gaps are intentional):',
+            JSON.stringify(item.elementReferences)
+          ]
+        : []),
       item.text
     ])
   ].join('\n')

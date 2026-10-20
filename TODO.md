@@ -79,6 +79,12 @@ adapters and walkthrough recording remain future capabilities.
     discovery, a live input meter, and actionable permission errors. Add
     Transcribe for editable review without sending and confirmed cancellation
     that preserves typed text and rejects late canceled results.
+  - [x] Add remembered Speak/Write feedback modes with shared explicit canvas
+    selections, stable numbered badges/chips, hover previews, pan-safe clicks,
+    caret restoration, and a send/copy shortcut. Preserve numbered references
+    through private storage, clipboard snapshots, and Copilot delivery.
+  - [x] Align Clear with Copy, Queue, and Send now; shorten the clipboard action
+    to Copy and add local, accessible icons to every feedback-panel button.
   - [x] Bundle the companion in packaged applications and add an explicit
     user-wide install/update action that refuses to overwrite unmanaged copies.
 - [ ] Evaluate walkthrough recording and additional agent adapters only after the

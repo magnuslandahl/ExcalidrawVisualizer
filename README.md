@@ -96,15 +96,31 @@ format; choose SVG for vector output.
 
 Open **Give feedback** on a drawing from the tab row. Visualizer temporarily hides
 the tab/action row and asks Excalidraw to use zen mode so the canvas stays visible.
-Start dictating and interact naturally with the drawing. Visualizer samples pointer
+Choose **Speak** or **Write** (remembered locally). Both use the same selection:
+hover to preview an item, then click to add it. Dragging pans instead of selecting;
+zoom remains available. Selected items appear as numbered canvas badges and
+removable chips. Use those numbers in your text, for example, "Move 1 next to 2."
+Repeated clicks do not remove items. Remove a chip or choose **Clear items** to
+return to whole-drawing feedback; remaining numbers are never reassigned within
+a message. Numbering restarts for a new message. If a selected item disappears,
+remove its chip before sending or copying.
+
+In **Write**, type your feedback and click canvas items as needed. After a click,
+focus returns to the text field without moving the caret. No microphone access
+or hover trace is captured in this mode. **Ctrl+Enter** (or **Cmd+Enter**) sends
+immediately when paired, or copies for an agent when unpaired. Nothing is sent
+merely by selecting an item. Clipboard and Copilot submissions include the
+number-to-element-ID mapping and bounded labels from explicitly selected items.
+
+In **Speak**, start dictating and interact naturally with the drawing. Visualizer samples pointer
 movement and hovered element IDs and records click order and relative timing even
 while the viewing canvas pans. Clicked elements become the feedback target
 automatically; if nothing is clicked, the target
-remains the whole drawing. No target picker is required. **Copy for agent** puts a
+remains the whole drawing. No target picker is required. **Copy** puts a
 revision-labelled text submission on the clipboard, so the local workflow also works
 without pairing an agent.
 
-The feedback composer also supports local dictation. Under **Microphone**, choose
+In **Speak**, under **Microphone**, choose
 **System default** or a specific input. **Refresh microphones** explicitly requests
 audio-only access and lists available inputs; it stops that discovery capture
 immediately afterward. The selected input is remembered locally. If it becomes
@@ -116,7 +132,7 @@ include Windows/macOS settings guidance.
 
 During recording, **Transcribe** stops capture and puts the local transcript into
 the editable feedback field without sending anything, even when paired. Review
-and edit it before choosing **Send now**, **Queue**, or **Copy for agent**.
+and edit it and the selected items before choosing **Send now**, **Queue**, or **Copy**.
 When paired, **Send feedback** remains the one-button stop, transcribe, and send
 action; an accepted delivery resets the composer for the next message.
 **Cancel** (or **Cancel transcription**) asks for confirmation before discarding

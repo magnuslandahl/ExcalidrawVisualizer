@@ -8,6 +8,7 @@ import {
   FeedbackParseError,
   parseFeedbackInteractionTrace,
   parseFeedbackTarget,
+  parseLocalFeedback,
   type FeedbackTarget,
   type LocalFeedback
 } from '../src/shared/feedback'
@@ -53,6 +54,40 @@ afterEach(async () => {
 })
 
 describe('FeedbackStore', () => {
+  it('validates references and keeps their original numbering in immutable submissions', async () => {
+    const { store } = await arrangeStore()
+    const referenced = {
+      ...draft('references', 'document-1', {
+        type: 'elements', elementIds: ['a', 'b'],
+        originalBounds: { x: 0, y: 0, width: 100, height: 50 }
+      }),
+      elementReferences: [
+        { number: 2, elementId: 'b', label: 'Database' },
+        { number: 5, elementId: 'a', label: 'API' }
+      ]
+    }
+    await store.upsertDraft(referenced)
+    const input = {
+      id: 'references-submission', documentId: 'document-1', feedbackIds: ['references'],
+      documentRevision: 'revision-1', createdAt: timestamp(1)
+    }
+    const submission = await store.createSubmission(input)
+    referenced.elementReferences[0]!.label = 'Changed later'
+    expect(submission.feedback[0]?.elementReferences).toEqual([
+      { number: 2, elementId: 'b', label: 'Database' },
+      { number: 5, elementId: 'a', label: 'API' }
+    ])
+    for (const elementReferences of [
+      [{ number: 0, elementId: 'a', label: 'API' }],
+      [{ number: 1, elementId: 'missing', label: 'API' }],
+      [{ number: 1, elementId: 'a', label: 'x'.repeat(121) }],
+      [{ number: 1, elementId: 'a', label: 'API' }, { number: 1, elementId: 'b', label: 'DB' }],
+      [{ number: 1, elementId: 'a', label: 'API' }, { number: 2, elementId: 'a', label: 'API' }],
+      Array.from({ length: 101 }, (_, i) => ({ number: i + 1, elementId: 'a', label: 'API' }))
+    ]) {
+      expect(() => parseLocalFeedback({ ...referenced, elementReferences })).toThrow(FeedbackParseError)
+    }
+  })
   it('persists data and reloads it', async () => {
     const { path, store } = await arrangeStore()
     await store.upsertDraft(draft('feedback-1', 'document-1'))

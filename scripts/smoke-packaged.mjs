@@ -526,7 +526,7 @@ try {
         `document.querySelector('.feedback-auto-context')?.textContent?.trim() ?? ''`
       ),
       (context) =>
-        context.includes('1 selected element') &&
+        context.includes('1 selected item') &&
         Number(context.match(/(\d+) interactions?/)?.[1] ?? 0) >= 2,
       'selected element feedback context during recording'
     )
@@ -579,6 +579,100 @@ try {
       'recording cancellation'
     )
   }
+  await connection.evaluate(`(() => {
+    const controls = [...document.querySelectorAll('.feedback-panel button')]
+    controls.find((button) => button.textContent?.trim() === 'Clear')?.click()
+    controls.find((button) => button.textContent?.trim() === 'Write')?.click()
+  })()`)
+  const writePointer = await connection.evaluate(`(() => {
+    const rect = document.querySelector('.editor-slot--active .canvas-shell')?.getBoundingClientRect()
+    if (!rect) throw new Error('Feedback canvas is unavailable')
+    return { x: rect.left + 270, y: rect.top + 245 }
+  })()`)
+  for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) {
+    await connection.send('Input.dispatchMouseEvent', {
+      type, x: writePointer.x, y: writePointer.y,
+      ...(type === 'mouseMoved' ? {} : { button: 'left', clickCount: 1 })
+    })
+  }
+  await waitFor(
+    () => connection.evaluate(`(() => {
+      const text = document.querySelector('.feedback-text-label textarea')
+      return document.activeElement === text &&
+        !!document.querySelector('[data-feedback-element="feedback-test-rectangle"]') &&
+        !document.querySelector('.microphone-controls')
+    })()`),
+    Boolean,
+    'silent canvas selection and textarea focus'
+  )
+  const feedbackActionLayout = await connection.evaluate(`(() => {
+    const panel = document.querySelector('.feedback-panel')
+    const actions = panel?.querySelector('.feedback-composer-actions')
+    if (!(panel instanceof HTMLElement) || !(actions instanceof HTMLElement)) {
+      throw new Error('Feedback actions are unavailable')
+    }
+    const buttons = [...actions.querySelectorAll('button')]
+    const measure = () => buttons.map((button) => {
+      const rect = button.getBoundingClientRect()
+      return { x: rect.x, y: rect.y, right: rect.right, height: rect.height }
+    })
+    const originalWidth = panel.style.width
+    const wide = measure()
+    let narrow
+    try {
+      panel.style.width = '280px'
+      narrow = measure()
+    } finally {
+      panel.style.width = originalWidth
+    }
+    return {
+      labels: buttons.map((button) => button.textContent.trim()),
+      icons: [...panel.querySelectorAll('button')].every((button) =>
+        !!button.querySelector('svg[aria-hidden="true"][focusable="false"]')),
+      wide, narrow,
+      right: actions.getBoundingClientRect().right,
+      fits: actions.scrollWidth <= actions.clientWidth + 1
+    }
+  })()`)
+  const { wide, narrow } = feedbackActionLayout
+  if (
+    feedbackActionLayout.labels.join('|') !== 'Clear|Copy|Queue|Send now' ||
+    !feedbackActionLayout.icons || !feedbackActionLayout.fits ||
+    wide.length !== 4 ||
+    wide.some((button) =>
+      Math.abs(button.y - wide[0].y) > 1 ||
+      Math.abs(button.height - wide[0].height) > 1 ||
+      button.right > feedbackActionLayout.right + 1) ||
+    Math.abs(narrow[0].y - narrow[1].y) > 1 ||
+    Math.abs(narrow[2].y - narrow[3].y) > 1 ||
+    Math.abs(narrow[0].x - narrow[2].x) > 1 ||
+    Math.abs(narrow[1].x - narrow[3].x) > 1 ||
+    narrow[2].y <= narrow[0].y
+  ) {
+    throw new Error(`Feedback button alignment or icons failed: ${JSON.stringify(feedbackActionLayout)}`)
+  }
+  await connection.send('Input.insertText', { text: 'Update item 1.' })
+  await connection.send('Input.dispatchKeyEvent', {
+    type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, modifiers: 2
+  })
+  await connection.send('Input.dispatchKeyEvent', {
+    type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, modifiers: 2
+  })
+  await waitFor(
+    () => connection.evaluate(`(async () => {
+      const id = document.querySelector('.editor-slot--active')?.dataset.documentId
+      if (!id) throw new Error('Active document identity is unavailable')
+      const state = await window.desktop.listFeedback(id)
+      return state.submissions.some((submission) => submission.feedback.some((item) =>
+        item.text === 'Update item 1.' &&
+        item.elementReferences?.[0]?.number === 1 &&
+        item.elementReferences?.[0]?.elementId === 'feedback-test-rectangle' &&
+        item.interactionTrace?.length === 0
+      ))
+    })()`),
+    Boolean,
+    'immutable typed feedback copy with numbered references'
+  )
   await connection.evaluate(`(() => {
     const button = document.querySelector('.feedback-panel > header > button')
     if (!(button instanceof HTMLButtonElement)) {
@@ -935,6 +1029,10 @@ try {
         microphoneSelection: testRecordingSelection ? true : 'not-tested',
         microphoneAudioLevel: testRecordingSelection ? true : 'not-tested',
         recordingCancelConfirmation: testRecordingSelection ? true : 'not-tested',
+        typedFeedbackSelection: true,
+        typedFeedbackShortcut: true,
+        feedbackButtonIcons: feedbackActionLayout.icons,
+        feedbackActionAlignment: true,
         exportFormats: exportOptions.length,
         emptyExportRejected: true,
         exportBridgeValidated: true,
