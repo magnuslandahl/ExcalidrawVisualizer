@@ -526,6 +526,10 @@ that the compact bar has wide tabs and that Edit exposes the background control.
 Excalidraw emits `onChange` after prop updates, so recording target updates
 must be idempotent to prevent a renderer-crashing update loop.
 
+Every platform activates the synthetic drawing before exercising typed feedback;
+that setup must not depend on microphone tests. Use `--skip-recording` on Windows
+to exercise the same non-recording feedback path used by the macOS smoke.
+
 The macOS package smoke test (`npm run smoke:mac -- <app-path>`) verifies:
 
 - a real window appears

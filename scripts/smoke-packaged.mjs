@@ -16,12 +16,13 @@ import { basename, join, resolve } from 'node:path'
 
 const packagePathArgument = process.argv[2]
 const shouldCheckUpdates = process.argv.includes('--check-update')
-const testRecordingSelection = process.platform === 'win32'
+const testRecordingSelection =
+  process.platform === 'win32' && !process.argv.includes('--skip-recording')
 const WebSocketClient = globalThis.WebSocket
 
 if (!packagePathArgument) {
   throw new Error(
-    'Usage: npm run smoke:packaged -- <path-to-app-or-executable>'
+    'Usage: npm run smoke:packaged -- <path-to-app-or-executable> [--check-update] [--skip-recording]'
   )
 }
 if (typeof WebSocketClient !== 'function') {
@@ -379,25 +380,23 @@ try {
     'both launch-path tabs and non-zero canvas layers'
   )
 
-  if (testRecordingSelection) {
-    await connection.evaluate(`(() => {
-      const targetName = ${JSON.stringify(basename(secondScenePath))}
-      const tab = [...document.querySelectorAll('.document-tab')]
-        .find((candidate) =>
-          candidate.querySelector('.document-tab__select span')?.textContent === targetName
-        )
-      const selectButton = tab?.querySelector('.document-tab__select')
-      if (!(selectButton instanceof HTMLButtonElement)) {
-        throw new Error('The synthetic drawing tab is unavailable')
-      }
-      selectButton.click()
-    })()`)
-    await waitFor(
-      () => readRendererState(connection),
-      (state) => state.documentPath === secondScenePath,
-      'synthetic feedback drawing to become active'
-    )
-  }
+  await connection.evaluate(`(() => {
+    const targetName = ${JSON.stringify(basename(secondScenePath))}
+    const tab = [...document.querySelectorAll('.document-tab')]
+      .find((candidate) =>
+        candidate.querySelector('.document-tab__select span')?.textContent === targetName
+      )
+    const selectButton = tab?.querySelector('.document-tab__select')
+    if (!(selectButton instanceof HTMLButtonElement)) {
+      throw new Error('The synthetic drawing tab is unavailable')
+    }
+    selectButton.click()
+  })()`)
+  await waitFor(
+    () => readRendererState(connection),
+    (state) => state.documentPath === secondScenePath,
+    'synthetic feedback drawing to become active'
+  )
 
   await connection.evaluate(`(() => {
     const button = [...document.querySelectorAll('.workspace-actions button')]

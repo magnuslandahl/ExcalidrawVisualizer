@@ -85,6 +85,8 @@ adapters and walkthrough recording remain future capabilities.
     through private storage, clipboard snapshots, and Copilot delivery.
   - [x] Align Clear with Copy, Queue, and Send now; shorten the clipboard action
     to Copy and add local, accessible icons to every feedback-panel button.
+  - [x] Activate the synthetic feedback drawing on every platform, independent
+    of microphone smoke coverage; verify typed feedback without recording.
   - [x] Bundle the companion in packaged applications and add an explicit
     user-wide install/update action that refuses to overwrite unmanaged copies.
 - [ ] Evaluate walkthrough recording and additional agent adapters only after the
