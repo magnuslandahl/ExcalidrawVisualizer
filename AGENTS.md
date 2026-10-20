@@ -529,6 +529,8 @@ must be idempotent to prevent a renderer-crashing update loop.
 Every platform activates the synthetic drawing before exercising typed feedback;
 that setup must not depend on microphone tests. Use `--skip-recording` on Windows
 to exercise the same non-recording feedback path used by the macOS smoke.
+Wait for Write mode before dispatching a primary-button gesture; selection
+timeouts report canvas geometry, pointer events, and textarea focus separately.
 
 The macOS package smoke test (`npm run smoke:mac -- <app-path>`) verifies:
 

@@ -511,6 +511,7 @@ try {
       x: pointer.x,
       y: pointer.y,
       button: 'left',
+      buttons: 1,
       clickCount: 1
     })
     await connection.send('Input.dispatchMouseEvent', {
@@ -583,25 +584,59 @@ try {
     controls.find((button) => button.textContent?.trim() === 'Clear')?.click()
     controls.find((button) => button.textContent?.trim() === 'Write')?.click()
   })()`)
+  await waitFor(
+    () => connection.evaluate(`(() => {
+      const write = [...document.querySelectorAll('.feedback-input-modes button')]
+        .find((button) => button.textContent?.trim() === 'Write')
+      const text = document.querySelector('.feedback-text-label textarea')
+      return write?.getAttribute('aria-pressed') === 'true' &&
+        text instanceof HTMLTextAreaElement && !text.disabled &&
+        !document.querySelector('.microphone-controls')
+    })()`),
+    Boolean,
+    'Write mode to become ready'
+  )
   const writePointer = await connection.evaluate(`(() => {
-    const rect = document.querySelector('.editor-slot--active .canvas-shell')?.getBoundingClientRect()
-    if (!rect) throw new Error('Feedback canvas is unavailable')
+    const canvas = document.querySelector('.editor-slot--active .canvas-shell')
+    if (!(canvas instanceof HTMLElement)) throw new Error('Feedback canvas is unavailable')
+    const rect = canvas.getBoundingClientRect()
+    canvas.smokePointerEvents = []
+    for (const type of ['pointerdown', 'pointerup', 'pointercancel', 'pointerleave']) {
+      canvas.addEventListener(type, (event) => {
+        canvas.smokePointerEvents.push({
+          type: event.type, x: event.clientX, y: event.clientY,
+          button: event.button, buttons: event.buttons, pointerId: event.pointerId
+        })
+        canvas.smokePointerEvents = canvas.smokePointerEvents.slice(-8)
+      }, { capture: true })
+    }
     return { x: rect.left + 270, y: rect.top + 245 }
   })()`)
   for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) {
     await connection.send('Input.dispatchMouseEvent', {
       type, x: writePointer.x, y: writePointer.y,
+      buttons: type === 'mousePressed' ? 1 : 0,
       ...(type === 'mouseMoved' ? {} : { button: 'left', clickCount: 1 })
     })
   }
   await waitFor(
     () => connection.evaluate(`(() => {
       const text = document.querySelector('.feedback-text-label textarea')
-      return document.activeElement === text &&
-        !!document.querySelector('[data-feedback-element="feedback-test-rectangle"]') &&
-        !document.querySelector('.microphone-controls')
+      const canvas = document.querySelector('.editor-slot--active .canvas-shell')
+      const hover = canvas?.querySelector('.feedback-anchor--hover')
+      return {
+        focused: document.activeElement === text,
+        selected: !!document.querySelector('[data-feedback-element="feedback-test-rectangle"]'),
+        microphoneControls: !!document.querySelector('.microphone-controls'),
+        activeElement: document.activeElement?.outerHTML.slice(0, 200),
+        pointerTarget: document.elementFromPoint(${writePointer.x}, ${writePointer.y})?.className,
+        pointerEvents: canvas?.smokePointerEvents,
+        canvas: canvas?.getBoundingClientRect().toJSON(),
+        hover: hover?.getBoundingClientRect().toJSON(),
+        viewport: { width: innerWidth, height: innerHeight, scale: devicePixelRatio }
+      }
     })()`),
-    Boolean,
+    (state) => state.focused && state.selected && !state.microphoneControls,
     'silent canvas selection and textarea focus'
   )
   const feedbackActionLayout = await connection.evaluate(`(() => {
