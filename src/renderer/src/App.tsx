@@ -25,6 +25,7 @@ import {
   type MergeConflict
 } from '../../shared/merge'
 import { parseSceneText, type ExcalidrawScene } from '../../shared/scene'
+import { isDictationLanguage } from '../../shared/contracts'
 import type {
   AppCommand,
   CopilotCompanionStatus,
@@ -120,7 +121,9 @@ type DocumentEditorProps = {
   editing: boolean
   theme: Theme
   microphoneId: string
+  dictationLanguage: DictationLanguage
   onMicrophoneChange: (deviceId: string) => void
+  onDictationLanguageChange: (language: DictationLanguage) => void
   onMetaChange: (documentId: string, meta: EditorMeta) => void
 }
 
@@ -138,6 +141,7 @@ type RecordingSession = {
   chunks: Float32Array[]
   sourceSampleRate: number
   draftId: string
+  language: DictationLanguage
   timeout?: ReturnType<typeof setTimeout>
 }
 
@@ -157,6 +161,7 @@ type PointerSample = {
 const themePreferenceStorageKey = 'excalidraw-visualizer-theme'
 const microphoneStorageKey = 'excalidraw-visualizer-microphone'
 const feedbackModeStorageKey = 'excalidraw-visualizer-feedback-mode'
+const dictationLanguageStorageKey = 'excalidraw-visualizer-dictation-language'
 const defaultCanvasBackground = '#ffffff'
 const disconnectedAgentStatus: AgentConnectionStatus = {
   paired: false,
@@ -367,7 +372,9 @@ function DocumentEditor({
   editing,
   theme,
   microphoneId,
+  dictationLanguage,
   onMicrophoneChange,
+  onDictationLanguageChange,
   onMetaChange
 }: DocumentEditorProps): React.JSX.Element {
   const initialScene = useMemo(() => normalizeScene(document.scene), [document])
@@ -459,8 +466,6 @@ function DocumentEditor({
   const [sceneElementBounds, setSceneElementBounds] = useState<
     Record<string, FeedbackBounds>
   >({})
-  const [dictationLanguage, setDictationLanguage] =
-    useState<DictationLanguage>('auto')
   const [dictationState, setDictationState] = useState<
     'idle' | 'starting' | 'recording' | 'transcribing' | 'sending'
   >('idle')
@@ -469,6 +474,7 @@ function DocumentEditor({
   const [microphoneListError, setMicrophoneListError] = useState<string | null>(null)
   const [microphoneRefreshing, setMicrophoneRefreshing] = useState(false)
   const [recordingMicrophone, setRecordingMicrophone] = useState('')
+  const [recordingLanguage, setRecordingLanguage] = useState<DictationLanguage>('auto')
   const [audioLevel, setAudioLevel] = useState(0)
 
   const refreshMicrophones = useCallback(async (requestAccess = false): Promise<void> => {
@@ -1512,7 +1518,7 @@ function DocumentEditor({
         jobId,
         documentId: document.id,
         draftId: recording.draftId,
-        language: dictationLanguage,
+        language: recording.language,
         wavData
       })
       if (dictationCanceledRef.current) {
@@ -1568,7 +1574,6 @@ function DocumentEditor({
   }, [
     agentState.connection.paired,
     deliverFeedback,
-    dictationLanguage,
     document.id
   ])
 
@@ -1586,6 +1591,7 @@ function DocumentEditor({
     lastPointerSampleRef.current = null
     setInteractionEventCount(0)
     const startToken = {}
+    setRecordingLanguage(dictationLanguage)
     recordingStartRef.current = startToken
     setDictationState('starting')
     dictationCanceledRef.current = false
@@ -1640,7 +1646,8 @@ function DocumentEditor({
         stream,
         chunks,
         sourceSampleRate: audioContext.sampleRate,
-        draftId
+        draftId,
+        language: dictationLanguage
       }
       recording.timeout = setTimeout(() => {
         if (recordingRef.current === recording) {
@@ -1669,7 +1676,7 @@ function DocumentEditor({
         }
       }
     }
-  }, [draftId, finishRecording, microphoneId, refreshMicrophones])
+  }, [dictationLanguage, draftId, finishRecording, microphoneId, refreshMicrophones])
 
   const cancelDictation = useCallback(async (): Promise<void> => {
     if (!window.confirm('Are you sure you want to cancel? This recording or transcript will be discarded. Existing feedback text will be kept.')) {
@@ -2169,13 +2176,15 @@ function DocumentEditor({
               {feedbackMode === 'speak' && <div className="dictation-controls">
                 <select
                   aria-label="Dictation language"
-                  value={dictationLanguage}
+                  aria-describedby={`dictation-model-${document.id}`}
+                  value={dictationState === 'idle' ? dictationLanguage : recordingLanguage}
                   disabled={dictationState !== 'idle'}
-                  onChange={(changeEvent) =>
-                    setDictationLanguage(
-                      changeEvent.target.value as DictationLanguage
-                    )
-                  }
+                  onChange={(changeEvent) => {
+                    const language = changeEvent.target.value
+                    if (isDictationLanguage(language)) {
+                      onDictationLanguageChange(language)
+                    }
+                  }}
                 >
                   <option value="auto">Auto language</option>
                   <option value="sv">Svenska</option>
@@ -2228,6 +2237,15 @@ function DocumentEditor({
                   </button>
                 )}
               </div>}
+              {feedbackMode === 'speak' && dictationState === 'idle' && (
+                <p className="feedback-progress dictation-model-hint" id={`dictation-model-${document.id}`}>
+                  {dictationLanguage === 'sv'
+                    ? 'Svenska uses KB-Whisper small, specialized for Swedish. Your language choice is remembered.'
+                    : dictationLanguage === 'en'
+                      ? 'English uses multilingual Whisper small. Your language choice is remembered.'
+                      : 'Auto detects locally, then uses KB-Whisper small for Swedish or Whisper small for other languages. Choose Svenska for faster, more reliable Swedish dictation on short recordings.'}
+                </p>
+              )}
               {dictationState === 'recording' && (
                 <div className="microphone-meter">
                   <span>{recordingMicrophone}</span>
@@ -2395,6 +2413,10 @@ export function App(): React.JSX.Element {
   const [microphoneId, setMicrophoneId] = useState(
     () => window.localStorage.getItem(microphoneStorageKey) ?? ''
   )
+  const [dictationLanguage, setDictationLanguage] = useState<DictationLanguage>(() => {
+    const stored = window.localStorage.getItem(dictationLanguageStorageKey)
+    return isDictationLanguage(stored) ? stored : 'auto'
+  })
   const [appVersion, setAppVersion] = useState('')
   const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null)
   const [updatePhase, setUpdatePhase] = useState<UpdatePhase>('idle')
@@ -2573,6 +2595,10 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     window.localStorage.setItem(microphoneStorageKey, microphoneId)
   }, [microphoneId])
+
+  useEffect(() => {
+    window.localStorage.setItem(dictationLanguageStorageKey, dictationLanguage)
+  }, [dictationLanguage])
 
   useEffect(() => {
     let canceled = false
@@ -3217,6 +3243,8 @@ export function App(): React.JSX.Element {
                 document={tab.document}
                 microphoneId={microphoneId}
                 onMicrophoneChange={setMicrophoneId}
+                dictationLanguage={dictationLanguage}
+                onDictationLanguageChange={setDictationLanguage}
                 event={tab.event}
                 eventVersion={tab.eventVersion}
                 command={commands[tab.document.id] ?? null}

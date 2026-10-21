@@ -204,6 +204,15 @@ afterEach(async () => {
 })
 
 describe('dictation feedback UI', () => {
+  const chooseLanguage = async (language: string): Promise<void> => {
+    const select = container.querySelector('[aria-label="Dictation language"]')
+    if (!(select instanceof HTMLSelectElement)) throw new Error('Missing dictation language')
+    await act(async () => {
+      select.value = language
+      select.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+  }
+
   const pointer = async (type: string, x: number, y = 30, button = 0): Promise<void> => {
     await act(async () => {
       const canvas = container.querySelector('canvas')
@@ -394,6 +403,72 @@ describe('dictation feedback UI', () => {
     expect(button('Cancel')).toBeDefined()
     expect(button('Transcribe')).toBeDefined()
     expect(button('Send feedback')).toBeDefined()
+  })
+
+  it('explains automatic routing and remembers an explicitly selected Swedish language', async () => {
+    expect(container.querySelector('.dictation-model-hint')?.textContent)
+      .toContain('Auto detects locally')
+    await chooseLanguage('sv')
+    expect(window.localStorage.getItem('excalidraw-visualizer-dictation-language')).toBe('sv')
+    expect(container.querySelector('.dictation-model-hint')?.textContent)
+      .toContain('Svenska uses KB-Whisper small')
+    await startWithAudio()
+    const select = container.querySelector('[aria-label="Dictation language"]')
+    expect(select).toHaveProperty('disabled', true)
+    await click('Transcribe')
+    expect(desktop.transcribe).toHaveBeenCalledWith(expect.objectContaining({ language: 'sv' }))
+    expect(feedbackText().value).toBe('Change this label.')
+    expect(desktop.deliverFeedback).not.toHaveBeenCalled()
+  })
+
+  it('shares the language across tabs without changing a recording already in progress', async () => {
+    await chooseLanguage('sv')
+    await startWithAudio()
+    await act(async () => documentListener({
+      type: 'opened',
+      document: {
+        id: 'second-document', path: null, fingerprint: '',
+        scene: { type: 'excalidraw', version: 2, elements: [], appState: {}, files: {} }
+      }
+    }))
+    await click('Give feedback')
+    const select = container.querySelector('.editor-slot--active [aria-label="Dictation language"]')
+    if (!(select instanceof HTMLSelectElement)) throw new Error('Missing second-tab language')
+    expect(select.value).toBe('sv')
+    await act(async () => {
+      select.value = 'en'
+      select.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    expect(window.localStorage.getItem('excalidraw-visualizer-dictation-language')).toBe('en')
+    const recordingSelect = container.querySelector('.editor-slot:not(.editor-slot--active) [aria-label="Dictation language"]')
+    expect(recordingSelect).toHaveProperty('value', 'sv')
+    await click('Transcribe')
+    expect(desktop.transcribe).toHaveBeenCalledWith(expect.objectContaining({ language: 'sv' }))
+    expect(recordingSelect).toHaveProperty('value', 'en')
+  })
+
+  it.each(['en', 'sv', 'auto', 'invalid'])('restores the validated remembered language %s', async (stored) => {
+    window.localStorage.setItem('excalidraw-visualizer-dictation-language', stored)
+    await act(async () => {
+      root.unmount()
+      root = createRoot(container)
+      root.render(createElement(App))
+    })
+    await act(async () => documentListener({
+      type: 'opened',
+      document: {
+        id: 'reopened', path: null, fingerprint: '',
+        scene: { type: 'excalidraw', version: 2, elements: [], appState: {}, files: {} }
+      }
+    }))
+    await click('Give feedback')
+    expect(container.querySelector('[aria-label="Dictation language"]'))
+      .toHaveProperty('value', stored === 'invalid' ? 'auto' : stored)
+    if (stored === 'en') {
+      expect(container.querySelector('.dictation-model-hint')?.textContent)
+        .toContain('English uses multilingual Whisper small')
+    }
+    expect(mediaDevices.getUserMedia).not.toHaveBeenCalled()
   })
 
   it('releases microphone access after explicitly refreshing inputs', async () => {

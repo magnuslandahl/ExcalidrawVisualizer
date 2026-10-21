@@ -55,6 +55,9 @@ export const ipcChannels = {
 
 export type DictationLanguage = 'sv' | 'en' | 'auto'
 
+export const isDictationLanguage = (value: unknown): value is DictationLanguage =>
+  value === 'sv' || value === 'en' || value === 'auto'
+
 export type DictationRequest = {
   jobId: string
   documentId: string

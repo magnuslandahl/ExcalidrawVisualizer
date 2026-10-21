@@ -13,16 +13,18 @@ import {
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
+import { URL } from 'node:url'
 
 const packagePathArgument = process.argv[2]
 const shouldCheckUpdates = process.argv.includes('--check-update')
+const shouldCheckDictation = process.argv.includes('--check-dictation')
 const testRecordingSelection =
   process.platform === 'win32' && !process.argv.includes('--skip-recording')
 const WebSocketClient = globalThis.WebSocket
 
 if (!packagePathArgument) {
   throw new Error(
-    'Usage: npm run smoke:packaged -- <path-to-app-or-executable> [--check-update] [--skip-recording]'
+    'Usage: npm run smoke:packaged -- <path-to-app-or-executable> [--check-update] [--check-dictation] [--skip-recording]'
   )
 }
 if (typeof WebSocketClient !== 'function') {
@@ -328,8 +330,27 @@ const waitFor = async (readValue, isReady, description) => {
   )
 }
 
+const wordErrorRate = (expected, actual) => {
+  const words = (text) => text.toLocaleLowerCase().match(/\p{L}+/gu) ?? []
+  const reference = words(expected)
+  const transcript = words(actual)
+  let previous = Array.from({ length: transcript.length + 1 }, (_, index) => index)
+  for (let row = 1; row <= reference.length; row += 1) {
+    const current = [row]
+    for (let column = 1; column <= transcript.length; column += 1) {
+      current[column] = Math.min(
+        previous[column] + 1, current[column - 1] + 1,
+        previous[column - 1] + (reference[row - 1] === transcript[column - 1] ? 0 : 1)
+      )
+    }
+    previous = current
+  }
+  return previous[transcript.length] / Math.max(1, reference.length)
+}
+
 let connection
 let manualUpdateState = 'not-requested'
+const dictationChecks = []
 
 try {
   connection = await connectToRenderer()
@@ -438,6 +459,64 @@ try {
       state.targetButtonCount === 0,
     'canvas-first feedback mode'
   )
+  await connection.evaluate(`(() => {
+    const select = document.querySelector('[aria-label="Dictation language"]')
+    if (!(select instanceof HTMLSelectElement)) throw new Error('Dictation language is unavailable')
+    select.value = 'sv'
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+  })()`)
+  await waitFor(
+    () => connection.evaluate(`(() => ({
+      language: document.querySelector('[aria-label="Dictation language"]')?.value,
+      stored: localStorage.getItem('excalidraw-visualizer-dictation-language'),
+      hint: document.querySelector('.dictation-model-hint')?.textContent ?? ''
+    }))()`),
+    (state) => state.language === 'sv' && state.stored === 'sv' &&
+      state.hint.includes('KB-Whisper small'),
+    'remembered Swedish language and model hint'
+  )
+  if (shouldCheckDictation) {
+    const fixtures = JSON.parse(await readFile(
+      new URL('../release/speech-fixtures/manifest.json', import.meta.url), 'utf8'
+    ))
+    const transcribe = async (audio, language) => connection.evaluate(`(async () => {
+      const documentId = document.querySelector('.editor-slot--active')?.dataset.documentId
+      if (!documentId) throw new Error('Active document identity is unavailable')
+      return window.desktop.transcribe({
+        jobId: crypto.randomUUID(), draftId: crypto.randomUUID(), documentId,
+        language: ${JSON.stringify(language)},
+        wavData: new Uint8Array(${JSON.stringify([...audio])})
+      })
+    })()`)
+    for (const fixture of fixtures) {
+      const audio = await readFile(new URL(
+        `../release/speech-fixtures/${fixture.file}`, import.meta.url
+      ))
+      // Formant-generated Swedish is not a reliable language-detection fixture.
+      const languages = fixture.language === 'en' ? ['en', 'auto'] : ['sv']
+      for (const language of languages) {
+        const started = Date.now()
+        const result = await transcribe(audio, language)
+        const errorRate = result.ok ? wordErrorRate(fixture.text, result.text) : 1
+        if (!result.ok || result.detectedLanguage !== fixture.language || errorRate >= 0.35) {
+          throw new Error(`Packaged ${language} dictation failed: ${JSON.stringify({
+            result, expectedLanguage: fixture.language, wordErrorRate: errorRate
+          })}`)
+        }
+        dictationChecks.push({
+          language, detectedLanguage: result.detectedLanguage,
+          wordErrorRate: errorRate, elapsedMs: Date.now() - started
+        })
+      }
+    }
+    const silence = await readFile(new URL(
+      '../release/speech-fixtures/silence.wav', import.meta.url
+    ))
+    const silentResult = await transcribe(silence, 'sv')
+    if (silentResult.ok || silentResult.message !== 'No speech was detected') {
+      throw new Error(`Packaged silence invented a transcript: ${JSON.stringify(silentResult)}`)
+    }
+  }
   if (testRecordingSelection) {
     await waitFor(
       () => connection.evaluate(
@@ -1063,6 +1142,9 @@ try {
         microphoneSelection: testRecordingSelection ? true : 'not-tested',
         microphoneAudioLevel: testRecordingSelection ? true : 'not-tested',
         recordingCancelConfirmation: testRecordingSelection ? true : 'not-tested',
+        rememberedDictationLanguage: true,
+        dictationModelHint: true,
+        packagedDictation: shouldCheckDictation ? dictationChecks : 'not-tested',
         typedFeedbackSelection: true,
         typedFeedbackShortcut: true,
         feedbackButtonIcons: feedbackActionLayout.icons,
