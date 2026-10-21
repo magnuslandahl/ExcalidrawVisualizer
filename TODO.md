@@ -92,6 +92,67 @@ adapters and walkthrough recording remain future capabilities.
 - [ ] Evaluate walkthrough recording and additional agent adapters only after the
   first complete Copilot workflow passes its acceptance gates.
 
+## Swedish dictation quality
+
+Implemented for 0.9.0. Reference inspected on 2026-10-21:
+[magnuslandahl/FeedbackRecorder#58](https://github.com/magnuslandahl/FeedbackRecorder/pull/58),
+commit `0042778d2106c1b04b73b44c8554aca956547ba0`, as present on FeedbackRecorder
+`main` at `896797962b33b6268697bebf87d1c21514cf5251`.
+The reference uses the same pinned `whisper.cpp` runtime as Visualizer.
+
+- [x] Verify the reference's model routing, failure behavior, and upstream
+  KB-Whisper small revision, size, SHA-256, and Apache-2.0 license.
+- [x] Bundle `KBLab/kb-whisper-small` revision
+  `3564d61a42fc210ceaa55a22a96dd64478959c78`, upstream `ggml-model.bin`, as
+  `vendor/whisper/models/ggml-kb-whisper-small.bin` through
+  `scripts/fetch-whisper-assets.mjs`. Verify both cached and downloaded weights:
+  487,601,984 bytes, SHA-256
+  `de6911330cbdc131362f7a955682b65c8a5a2394caba73e7ea821a9822efb8c6`.
+  Retain multilingual small and Silero VAD. This adds about 488 MB of
+  uncompressed weights; do not promise an installer size before packaging.
+- [x] Extend `src/main/dictation-service.ts` within the existing serialized job:
+  explicit `sv` uses KB-Whisper small with `-l sv`; explicit `en` retains
+  multilingual small. Auto first uses multilingual small with `-l auto -dl`,
+  then selects KB-Whisper only for detected `sv` and transcribes with the
+  detected language explicitly supplied. Detection is not a full first
+  transcription. One language/model is chosen per recording, not per sentence.
+- [x] Keep model paths fixed in the main process and retain the current typed
+  request/preload API; no renderer-supplied model, filesystem path, or download
+  capability is needed. Auto may detect a Whisper language outside the
+  Swedish/English picker without widening accepted renderer requests.
+  Separate detection and transcript outputs inside the existing unique job
+  directory. Report missing/corrupt Swedish weights and absent/failed language
+  detection explicitly, without silent fallback. Preserve cancellation,
+  timeout/output bounds, queue ordering, and cleanup across both stages.
+- [x] Keep the existing Auto language / Svenska / English picker, remember its
+  validated choice locally, and explain the selected model with a short hint.
+  Keep Auto as the first-run default and explain that explicit Svenska avoids
+  detection overhead and short-clip detection mistakes. Preserve Transcribe,
+  Send feedback, canvas references, typed text, and late-cancellation guards;
+  Write remains microphone-free. Share language preferences across mounted tabs,
+  and snapshot the chosen language when recording starts. No separate model
+  picker is needed.
+- [x] Add KB-Whisper attribution and the complete Apache-2.0 license to packaged
+  resources via `build/WHISPER-NOTICES.txt` and, if necessary,
+  `electron-builder.yml`. Check both model hashes and the new license in Windows
+  and both macOS package paths in `.github/workflows/ci.yml` and `release.yml`.
+  Retain build-time-only downloads, ignored vendor assets, and offline runtime.
+- [x] Add focused tests for direct Swedish/English routing, Auto Swedish and
+  non-Swedish routing, detection-only JSON without transcript segments,
+  malformed/missing detection output, missing/corrupt weights, process failure,
+  silence, queue sequencing, and cancellation during/between both stages.
+  Cover remembered picker/hints and unchanged feedback delivery in UI tests.
+- [x] Generate test-only Swedish/English speech locally with a hash-pinned
+  eSpeak loader under ignored `release/`. Add real Windows/native macOS packaged
+  transcription checks with a fixed-sentence word error threshold below 35%,
+  English Auto detection, silent-input rejection, and remembered language hints.
+  Compare both Swedish models on the same synthetic audio; do not treat one
+  synthetic sentence as a general accuracy benchmark. Formant-generated Swedish
+  is unreliable for language identification, so Auto Swedish model selection is
+  exercised by controlled engine tests rather than a misleading native assertion.
+- [x] Update README, the implemented-state briefing, and the semantic minor
+  version. Keep the offline and explicit-error guarantees visible.
+
 ## macOS support
 
 macOS packaging is implemented. Electron 44 sets the baseline at macOS 13

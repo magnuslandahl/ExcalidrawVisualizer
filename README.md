@@ -76,8 +76,8 @@ The packages are currently unsigned for distribution.
   click order, and relative timing; overlays never enter the `.excalidraw` file
 - Explicit one-time pairing with the current GitHub Copilot task, with separate
   queue/send-now delivery, admission receipts, replies, blocked state, and result history
-- Bundled offline English, Swedish, and automatic-language dictation using a pinned
-  `whisper.cpp` helper, multilingual model, and Silero VAD
+- Bundled offline dictation with Swedish-specialized KB-Whisper small,
+  multilingual Whisper small for English/other detected languages, and Silero VAD
 - Fully local JavaScript, CSS, worker chunks, and Excalidraw fonts
 
 ## Export a drawing
@@ -129,6 +129,16 @@ unavailable, choose another input rather than silently switching devices. Choose
 recorder shows the input name and an audio-level meter: speak to check the signal
 and check the microphone's mute control if the meter stays empty. Permission errors
 include Windows/macOS settings guidance.
+
+The language choice is remembered locally. **Svenska** uses
+[KB-Whisper small](https://huggingface.co/KBLab/kb-whisper-small), the National
+Library of Sweden's Swedish-specialized model. **English** keeps multilingual
+Whisper small. **Auto language** first detects the language locally with the
+multilingual model, then uses KB-Whisper for Swedish or multilingual Whisper for
+other detected languages. One language/model is chosen for the recording, not
+per sentence. Choosing **Svenska** directly avoids detection overhead and
+short-recording language mistakes. Missing/corrupt weights and detection
+failures are reported rather than silently selecting another model.
 
 During recording, **Transcribe** stops capture and puts the local transcript into
 the editable feedback field without sending anything, even when paired. Review
@@ -255,11 +265,31 @@ npm run package:win
 npm run package:mac
 ```
 
-Packaging runs `npm run prepare-whisper`, downloads approximately 489 MB of pinned model
+Packaging runs `npm run prepare-whisper`, downloads approximately 976 MB of pinned model
 assets, verifies exact byte sizes and SHA-256 hashes, and either extracts the pinned
 Windows x64 helper or compiles a universal macOS helper. Generated inputs stay under the
 ignored `vendor/whisper/` directory. Packaged applications include the component license
 notices from `build/WHISPER-NOTICES.txt`.
+This includes both small models; the Swedish weights add approximately 488 MB
+uncompressed. Downloads happen during preparation/build only, never at runtime.
+
+To exercise real packaged dictation using locally generated, test-only Swedish
+and English speech (Python is needed only for this optional smoke setup):
+
+```powershell
+python -m pip install --no-deps --only-binary=:all: --require-hashes --target release/speech-test-deps -r scripts/speech-test-requirements.txt
+python scripts/generate-speech-fixtures.py
+npm run smoke:packaged -- .\release\win-unpacked\ExcalidrawVisualizer.exe --check-dictation
+```
+
+On macOS, pass the native packaged `.app` path to `npm run smoke:mac` with
+`--check-dictation`. These checks assert explicit Swedish/English transcription,
+English Auto detection/transcription, and silent-input rejection through the
+sandboxed preload and main process. Speech errors must stay below a 35% word
+error rate for the fixed synthetic sentences. Formant-generated Swedish is not
+a reliable language-identification sample; Auto's Swedish model routing is
+covered separately by controlled engine tests. Generated audio and the pinned,
+test-only speech generator remain under ignored `release/` and are not shipped.
 
 Create only an unpacked application directory:
 

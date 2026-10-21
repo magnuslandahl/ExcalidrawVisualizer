@@ -223,7 +223,11 @@ execute the emitted ESM preload bundle.
   Installation is explicit, user-wide, and refuses to overwrite an unmanaged
   same-named extension. A new Copilot task or restart activates changes.
 - Feedback dictation is explicitly activated, editable before copying, and
-  processed offline through bundled English/Swedish multilingual Whisper assets.
+  processed offline through bundled KB-Whisper small for Swedish and
+  multilingual Whisper small for English/other detected languages. The
+  validated language choice is shared across mounted tabs and remembered
+  locally, with Auto as the first-run default. Recordings retain the language
+  chosen at capture start; choosing Svenska avoids short-clip detection mistakes.
   Typed text survives permission denial, cancellation, silence, or engine
   failure. The microphone selector remembers only the input ID locally; device
   names never enter drawings or provider messages. Refresh explicitly requests
@@ -311,6 +315,13 @@ dirty and does not expose download URLs or checksums to the renderer.
 `src/main/dictation-service.ts` serializes native Whisper jobs, validates bounded
 PCM WAV input, uses unique temporary paths, supports cancellation, limits
 process/output size, and removes completed or orphaned owned job directories.
+Explicit Swedish selects the fixed KB-Whisper small asset; English keeps
+multilingual small. Auto runs multilingual `-l auto -dl` before selecting a
+model and passing the detected language explicitly. Both stages share one job
+identity and timeout budget, keep separate output files, and honor cancellation
+between processes and before publishing a result. Missing weights or detection
+metadata never trigger silent fallback. Model paths stay in the main process;
+the renderer still sends only its validated language and bounded audio.
 
 `src/main/atomic-write.ts` writes a temporary file in the destination directory,
 flushes it, replaces the destination, and preserves its mode when supported.
@@ -419,7 +430,10 @@ shape changes or a remote fallback remains. Keep this fail-closed behavior when
 upgrading Excalidraw, and verify the resulting app with a network log.
 
 `scripts/fetch-whisper-assets.mjs` owns the speech supply chain. It downloads the
-pinned multilingual small model and Silero VAD with exact size/SHA-256 checks.
+pinned multilingual small model, Swedish KB-Whisper small, and Silero VAD with
+exact size/SHA-256 checks, including cached weights. KB-Whisper is pinned to
+revision `3564d61a42fc210ceaa55a22a96dd64478959c78`; its Apache-2.0 license and
+National Library of Sweden attribution ship in `build/WHISPER-NOTICES.txt`.
 On Windows x64 it verifies and extracts the pinned upstream archive. On macOS it
 checks out the pinned `whisper.cpp` commit and builds one static universal
 `arm64`/`x86_64` CLI with a macOS 13 deployment target. Generated assets live
@@ -513,6 +527,9 @@ The focused Vitest suite currently covers:
 - feedback schema validation, atomic persistence, immutable submissions, and
   concurrent mutation serialization
 - bounded PCM downsampling/WAV encoding and dictation request validation
+- explicit Swedish/English and two-stage Auto model routing, detection-only
+  output, malformed/missing model output, process failure, silent transcripts,
+  job serialization, shared timeouts, output limits, and cancellation races
 - microphone constraints, discovery cleanup, permission errors, audio levels,
   transcript review without delivery, direct sending, and cancellation races
 
@@ -531,6 +548,14 @@ that setup must not depend on microphone tests. Use `--skip-recording` on Window
 to exercise the same non-recording feedback path used by the macOS smoke.
 Wait for Write mode before dispatching a primary-button gesture; selection
 timeouts report canvas geometry, pointer events, and textarea focus separately.
+
+Both platform package jobs also use `--check-dictation`: a hash-pinned,
+test-only eSpeak loader generates Swedish/English PCM fixtures locally under
+ignored `release/`. The real packaged service must transcribe explicit Swedish
+and English below 35% word error rate, detect/transcribe English in Auto mode,
+and reject silent audio. Formant-synthesized Swedish is not a dependable
+language-identification sample; controlled engine tests cover Auto Swedish
+selection. The generator and its audio are never application resources.
 
 The macOS package smoke test (`npm run smoke:mac -- <app-path>`) verifies:
 
@@ -670,7 +695,9 @@ Implemented:
 - a compact viewer-first workspace with explicit Edit and a single tab/action row
 - canvas-first anchored feedback capture, atomic private persistence, immutable
   clipboard submissions, and direct Copilot delivery
-- bundled local English/Swedish dictation with pinned model/VAD inputs,
+- bundled local Swedish-specialized KB-Whisper small and multilingual Whisper
+  small, with remembered language choice, detection-first Auto routing,
+  pinned model/VAD inputs, packaged speech regression coverage,
   microphone-only permission, serialized native jobs, cancellation, and cleanup
 - finalized GitHub Copilot Stage 0 feasibility: explicit task-originated pairing
   is supported; global task discovery/activation/creation and seamless reverse

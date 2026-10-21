@@ -59,6 +59,11 @@ jobs:
       - name: Build unpacked Windows app
         run: npm run package:dir
 
+      - name: Generate test-only Swedish and English speech
+        run: |
+          python -m pip install --no-deps --only-binary=:all: --require-hashes --target release/speech-test-deps -r scripts/speech-test-requirements.txt
+          python scripts/generate-speech-fixtures.py
+
       - name: Verify packaged application
         shell: pwsh
         run: |
@@ -81,6 +86,16 @@ jobs:
               "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b") {
             throw "Packaged Whisper model hash is invalid"
           }
+          $swedish = "release\win-unpacked\resources\vendor\whisper\models\ggml-kb-whisper-small.bin"
+          if ((Get-FileHash -Algorithm SHA256 $swedish).Hash.ToLowerInvariant() -ne
+              "de6911330cbdc131362f7a955682b65c8a5a2394caba73e7ea821a9822efb8c6") {
+            throw "Packaged KB-Whisper model hash is invalid"
+          }
+          $notices = Get-Content "release\win-unpacked\resources\WHISPER-NOTICES.txt" -Raw
+          if ($notices -notmatch "National Library of Sweden" -or
+              $notices -notmatch "END OF TERMS AND CONDITIONS") {
+            throw "Packaged KB-Whisper attribution or license is missing"
+          }
           if ((Get-FileHash -Algorithm SHA256 $vad).Hash.ToLowerInvariant() -ne
               "29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf") {
             throw "Packaged VAD model hash is invalid"
@@ -88,7 +103,7 @@ jobs:
           if (-not $whisper) {
             throw "Missing packaged whisper.cpp executable"
           }
-          npm run smoke:packaged -- $executable
+          npm run smoke:packaged -- $executable --check-dictation
 
   package_macos:
     name: macOS packaging and runtime smoke test
@@ -107,6 +122,11 @@ jobs:
       - name: Build Apple silicon and Intel disk images
         run: npm run package:mac
 
+      - name: Generate test-only Swedish and English speech
+        run: |
+          python -m pip install --no-deps --only-binary=:all: --require-hashes --target release/speech-test-deps -r scripts/speech-test-requirements.txt
+          python scripts/generate-speech-fixtures.py
+
       - name: Verify packaged application runtime
         run: |
           set -euo pipefail
@@ -115,7 +135,7 @@ jobs:
           else
             app="release/mac/ExcalidrawVisualizer.app"
           fi
-          npm run smoke:mac -- "$app"
+          npm run smoke:mac -- "$app" --check-dictation
 
       - name: Verify both macOS architectures and disk images
         run: |
@@ -132,6 +152,10 @@ jobs:
             resources="$app/Contents/Resources/vendor/whisper"
             test "$(shasum -a 256 "$resources/models/ggml-small.bin" | cut -d' ' -f1)" = \
               "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b"
+            test "$(shasum -a 256 "$resources/models/ggml-kb-whisper-small.bin" | cut -d' ' -f1)" = \
+              "de6911330cbdc131362f7a955682b65c8a5a2394caba73e7ea821a9822efb8c6"
+            grep -q "National Library of Sweden" "$app/Contents/Resources/WHISPER-NOTICES.txt"
+            grep -q "END OF TERMS AND CONDITIONS" "$app/Contents/Resources/WHISPER-NOTICES.txt"
             test "$(shasum -a 256 "$resources/models/ggml-silero-v5.1.2.bin" | cut -d' ' -f1)" = \
               "29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf"
             helper_arches="$(lipo -archs "$resources/bin/macos-universal/whisper-cli")"

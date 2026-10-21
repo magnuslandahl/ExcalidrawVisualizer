@@ -30,6 +30,12 @@ const assets = {
     size: 487_601_967,
     sha256: '1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b'
   },
+  swedish: {
+    url: 'https://huggingface.co/KBLab/kb-whisper-small/resolve/3564d61a42fc210ceaa55a22a96dd64478959c78/ggml-model.bin',
+    path: join(modelRoot, 'ggml-kb-whisper-small.bin'),
+    size: 487_601_984,
+    sha256: 'de6911330cbdc131362f7a955682b65c8a5a2394caba73e7ea821a9822efb8c6'
+  },
   vad: {
     url: 'https://huggingface.co/ggml-org/whisper-vad/resolve/9ffd54a1e1ee413ddf265af9913beaf518d1639b/ggml-silero-v5.1.2.bin',
     path: join(modelRoot, 'ggml-silero-v5.1.2.bin'),
@@ -187,7 +193,7 @@ const installMacBinary = async () => {
   }
 }
 
-await Promise.all([download(assets.model), download(assets.vad)])
+await Promise.all([download(assets.model), download(assets.swedish), download(assets.vad)])
 
 if (process.platform === 'win32' && process.arch === 'x64') {
   await installWindowsBinary()
